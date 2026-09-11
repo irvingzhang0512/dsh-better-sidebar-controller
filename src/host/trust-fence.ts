@@ -38,18 +38,16 @@ export function isLoopbackHostname(hostname: string): boolean {
     && parts.every(part => /^\d{1,3}$/.test(part) && Number(part) <= 255)
 }
 
-/** Canonical authority form: hostname, or hostname:port when a port was written. */
-function canonicalAuthority(entry: string, entryUrl: URL): string {
-  const port = entryUrl.port !== '' ? entryUrl.port : new URL(`https://${entry}`).port
-  return port === '' ? entryUrl.hostname : `${entryUrl.hostname}:${port}`
-}
-
-/** Whether the request authority matches a trustedHosts entry (exact or port-less). */
+/**
+ * Whether the request authority matches a trustedHosts entry. A port-less
+ * entry (e.g. `dev.example.com`) matches any port of that hostname; an entry
+ * with an explicit port matches exactly.
+ */
 function isTrustedAuthority(hostUrl: URL, trustedHosts: readonly string[]): boolean {
   return trustedHosts.some((entry) => {
     const entryUrl = parseAuthority(entry)
     if (entryUrl === undefined) return false
-    return canonicalAuthority(entry, entryUrl) === entryUrl.hostname
+    return entryUrl.port === '' || entryUrl.port === '80' || entryUrl.port === '443'
       ? entryUrl.hostname === hostUrl.hostname
       : entryUrl.host === hostUrl.host
   })
