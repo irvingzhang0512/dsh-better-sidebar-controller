@@ -78,6 +78,13 @@ export function activeFileOf(state: SidebarState): string | null {
   return null
 }
 
+/** The id of the tab currently active in the active pane, or null. */
+export function activeTabIdOf(state: SidebarState): string | null {
+  const leaves = allLeaves(state)
+  const activeLeaf = leaves.find(leaf => leaf.id === state.activePane) ?? leaves[0]
+  return activeLeaf?.active ?? null
+}
+
 /** All open file paths (pane tabs then floats), deduplicated in first-open order. */
 export function openedFilesOf(state: SidebarState): string[] {
   const out: string[] = []

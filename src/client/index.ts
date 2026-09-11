@@ -21,8 +21,8 @@
  *    nothing; its tab strip pill is an accepted, documented artifact.
  */
 import type { Context } from 'dsh-better-sidebar'
-import type { SidebarStore } from 'dsh-better-sidebar/client/service'
-import { baseName, deriveSidebarState, findTabByPath, type DerivedSidebarState } from '../shared/derive.ts'
+import type { SidebarSnapshot, SidebarStore } from 'dsh-better-sidebar/client/service'
+import { activeTabIdOf, baseName, deriveSidebarState, findTabByPath, type DerivedSidebarState } from '../shared/derive.ts'
 import type { ClientToHostMessage, CommandAck, ControllerCommand, SidebarStateWire } from '../shared/types.ts'
 import { parseHostMessage } from '../shared/wire.ts'
 
@@ -254,7 +254,11 @@ export function apply(ctx: Context): void {
 
     // Anchor tab: the only non-invasive way to reach the store (and thus
     // `state.expanded` / panel visibility) through the public API. It renders
-    // nothing; its presence is an accepted, documented artifact.
+    // nothing. Because openTab ACTIVATES the tab (which would leave a blank
+    // pill hijacking the user's active view on every session switch / reload),
+    // the anchor is minted at most once per page load — the store capture is
+    // global, so later session switches need no second anchor — and the
+    // previously active tab is restored immediately after the open.
     const disposeAnchor = service.registerTab({
       id: ANCHOR_TYPE,
       hidden: true,
@@ -266,15 +270,27 @@ export function apply(ctx: Context): void {
       },
     })
 
-    // Follow the active session: reconnect the bridge and (re)open the anchor
-    // whenever the sidebar's session changes.
+    /** Mint the anchor tab in the BACKGROUND: never steal the user's active
+     *  tab. A no-op once the store is captured (global capture — later
+     *  session switches must not reopen/activate the anchor again). */
+    const openAnchorInBackground = (snapshot: SidebarSnapshot): void => {
+      if (store !== undefined) return
+      const previous = snapshot.state === undefined ? null : activeTabIdOf(snapshot.state)
+      service.openTab({ type: ANCHOR_TYPE, id: ANCHOR_TAB_ID, title: '' })
+      if (previous !== null && sessionId !== undefined) {
+        service.activateTab(previous, { sessionId })
+      }
+    }
+
+    // Follow the active session: reconnect the bridge and mint the anchor
+    // (once) whenever the sidebar's session changes.
     const onChange = (): void => {
       const snapshot = service.getSnapshot()
       const nextSession = snapshot.sessionId
       if (nextSession !== sessionId) {
         sessionId = nextSession
         if (nextSession !== undefined) {
-          service.openTab({ type: ANCHOR_TYPE, id: ANCHOR_TAB_ID, title: '' })
+          openAnchorInBackground(snapshot)
           if (socket === null) connect(nextSession)
           else if (attachedSession !== nextSession) connect(nextSession)
         }

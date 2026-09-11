@@ -43,6 +43,8 @@ export declare function leavesOf(node: SplitNode): SidebarLeaf[];
 export declare function allLeaves(state: SidebarState): SidebarLeaf[];
 /** The path of the currently active editor file, or null. */
 export declare function activeFileOf(state: SidebarState): string | null;
+/** The id of the tab currently active in the active pane, or null. */
+export declare function activeTabIdOf(state: SidebarState): string | null;
 /** All open file paths (pane tabs then floats), deduplicated in first-open order. */
 export declare function openedFilesOf(state: SidebarState): string[];
 /**
