@@ -30,6 +30,7 @@ import { BRIDGE_ACK_TIMEOUT_MS, BridgeServer } from './host/bridge-server.ts'
 import { ControllerStateStore } from './host/controller-state.ts'
 import { listDirectorySafe } from './host/fs-tree.ts'
 import { pathKind, resolveLexicalTarget, resolveWorkspaceTarget } from './host/paths.ts'
+import { loadBundledSkill } from './host/skill-registration.ts'
 import { registerControllerTools } from './host/tools.ts'
 import { isTrustedApiRequest } from './host/trust-fence.ts'
 import { parseClientMessage } from './shared/wire.ts'
@@ -39,9 +40,10 @@ import type { Context } from './context-types.ts'
 export const name = 'dsh-better-sidebar-controller'
 
 /** Services required before mounting: the webserver upgrade surface, the
- *  session store (authoritative cwd), the web runtime's trusted hosts, and
- *  the tool registry. */
-export const inject = ['tools', 'webServer', 'sessions', 'webRuntime']
+ *  session store (authoritative cwd), the web runtime's trusted hosts, the
+ *  tool registry, and the skill registry (for self-registering the bundled
+ *  SKILL.md so installing the plugin also installs its skill). */
+export const inject = ['tools', 'webServer', 'sessions', 'webRuntime', 'skills']
 
 /** Bridge upgrade path (must match the client half). */
 export const BRIDGE_PATH = '/sidebar-controller/ws'
@@ -101,6 +103,26 @@ export function apply(ctx: Context): void {
     listDirectory: listDirectorySafe,
     ackTimeoutMs: BRIDGE_ACK_TIMEOUT_MS,
   })
+
+  // Self-register the bundled SKILL.md on `ctx.skills` (the dsh-skill runtime
+  // registry). Installing the plugin therefore also installs its skill — no
+  // manual copy into a skills directory. Registration is async (file read) but
+  // the effect teardown is synchronous and race-safe.
+  ctx.effect(() => {
+    const skills = ctx.skills
+    let disposed = false
+    let skillDisposer: (() => void) | undefined
+    if (skills?.register !== undefined) {
+      void loadBundledSkill().then((skill) => {
+        if (disposed || skill === undefined) return
+        skillDisposer = skills.register(skill)
+      })
+    }
+    return () => {
+      disposed = true
+      skillDisposer?.()
+    }
+  }, 'dsh-better-sidebar-controller: bundled skill')
 
   ctx.effect(() => () => {
     toolsDisposer()

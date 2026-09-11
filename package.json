@@ -70,16 +70,21 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.2 <5.0.0",
+    "@deepseek-ai/dsh-skill": ">=0.1.2-rc.1 <0.2.0",
     "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0",
     "dsh-better-sidebar": ">=0.18.0 <0.20.0"
   },
   "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-skill": {
+      "optional": true
+    },
     "dsh-better-sidebar": {
       "optional": true
     }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-skill": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
     "@types/node": "^24.0.0",
     "@types/react": "^18.3.1",

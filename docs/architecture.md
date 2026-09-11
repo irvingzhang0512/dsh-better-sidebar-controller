@@ -30,7 +30,7 @@ better-sidebar 服务（ctx.betterSidebar：openFile / closeTab / activateTab / 
 | State | `src/shared/derive.ts` + `src/host/controller-state.ts` | 从 better-sidebar 快照推导语义状态（当前文件 / 上一个文件 / 已打开文件 / 已展开文件夹 / 侧边栏显隐），并维护 host 侧每会话镜像 |
 | Bridge | `src/host/bridge-server.ts`、`src/host/bridge-socket.ts`、`src/shared/wire.ts`、`src/client/index.ts` | host ↔ 浏览器客户端的双向通道：命令下发、ack、状态回推、断线重连、队列重放 |
 | Tools | `src/host/tools.ts` | 11 个明确的、单一职责的工具（无万能 command 工具） |
-| Skill | `skills/sidebar-controller/SKILL.md` | 自然语言 → 工具 的映射与约定 |
+| Skill | `src/host/skill-registration.ts` + `skills/sidebar-controller/SKILL.md` | **自注册技能**：host 挂载时把打包的 SKILL.md 注册进 `ctx.skills`，装插件即装技能；SKILL.md 仍是唯一事实源（自然语言 → 工具映射与约定） |
 | 支撑 | `src/host/paths.ts`、`src/host/fs-tree.ts`、`src/host/trust-fence.ts`、`src/context-types.ts` | 路径解析/围栏、目录列举、信任围栏、结构镜像类型 |
 
 约束：代码与 API 使用英文命名；文档全部为中文；本插件 **不包含** Structured Document
@@ -177,6 +177,28 @@ better-sidebar 发布物不导出 `fs-tree` / `path-security` / `trust-fence`（
 大多数 DSH 工具约定「失败就 throw」。本插件把业务失败（路径越界、文件未打开、无上一
 文件等）**返回为带明确错误码的结构化结果**，让模型拿到机器可读的错误而不仅是错误文本；
 只有参数校验失败走运行时 ToolArgsError。两种失败模型在 SKILL 里都有对应话术。
+
+### D7. 技能自注册（装插件即装技能）
+
+需求要求「提供可工作的 SKILL.md」，但把技能做成第二个手动安装步骤（复制到 skills 目录）
+对发布和安装都很别扭。DSH 0.1.2-rc.1+ 的 `dsh-skill` 运行时提供 `ctx.skills` 注册中心，
+其中 `ctx.skills.register(skill)` 就是为插件在 `apply()` 期间注册技能设计的：
+
+- host 半新增 `inject: ['skills']`；挂载时读取包内 `skills/sidebar-controller/SKILL.md`
+  （`skill-registration.ts` 解析 YAML frontmatter：name / description / whenToUse，
+  支持 `>-` 折叠块），把它注册为 `source: 'bundled'`、`provider: 'dsh-better-sidebar-controller'`
+  的运行时技能，缺省 invocation = 模型与用户双面可用。
+- SKILL.md 仍是**唯一事实源**（人写的完整映射/约定/话术），注册只做「读文件 → 解析 → 注册」，
+  不复制、不生成。`files` 已包含 `skills/`，发布包自带该文件。
+- 挂载采用 cordis effect（卸载时自动反注册），文件读取是异步但 teardown 同步且带 disposed
+  竞态保护；`ctx.skills` 缺失时（旧版运行时）优雅跳过，主机端其余功能不受影响
+  （`dsh-skill` 是 optional peer，测试里同样提供 stub 断言注册发生）。
+- 结果：**`dsh plugin --profile web add dsh-better-sidebar-controller` 一条命令，插件 + 技能
+  一次装好**，Agent 技能目录自动出现 `sidebar-controller`。手动复制仅作为旧版 DSH 的兜底。
+
+与此相对，`dsh-skill-filesystem` 提供的是文件系统技能源（项目 `.dsh/skills`、用户
+`<dshHome>/skills`、`customSkillDirs`、`DSH_BUNDLED_SKILL_DIR` 等发现根）——对本插件
+无必要，反而引入「技能与包分开管理」的复杂度。
 
 ## 测试策略
 

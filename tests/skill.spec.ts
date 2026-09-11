@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { CONTROLLER_TOOL_NAMES } from '../src/host/tools.ts'
+import { parseSkillFrontmatter } from '../src/host/skill-registration.ts'
 
 const SKILL_PATH = fileURLToPath(new URL('../skills/sidebar-controller/SKILL.md', import.meta.url))
 
@@ -25,6 +26,14 @@ describe('SKILL.md contract', () => {
     expect(skill).toMatch(/^description:\s*>/m)
     // description must mention the tools for discovery
     expect(skill.toLowerCase()).toContain('better-sidebar')
+  })
+
+  it('parses to the same registration the host self-registers', () => {
+    const parsed = parseSkillFrontmatter(skill)
+    expect(parsed).toBeDefined()
+    expect(parsed!.name).toBe('sidebar-controller')
+    expect(parsed!.description.length).toBeGreaterThan(20)
+    expect(parsed!.content).toContain('## 工具清单')
   })
 
   it('documents every registered tool in the tools table', () => {

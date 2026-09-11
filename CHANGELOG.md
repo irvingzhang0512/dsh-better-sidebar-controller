@@ -17,7 +17,8 @@ Initial release。基于 [requirements.txt](./requirements.txt) 的需求规格�
   - `Tools`：11 个明确小工具（无万能 command 工具），统一结构化结果
     `{ ok, code, message, ... }` 与 18 个明确错误码；纯文本 render 投影；
     路径相对会话 cwd 解析 + realpath 规范化 + 工作区围栏。
-  - `Skill`：`skills/sidebar-controller/SKILL.md` 自然语言 → 工具映射与约定。
+  - `Skill`：`skills/sidebar-controller/SKILL.md` 自然语言 → 工具映射与约定；host 挂载时
+    经 `ctx.skills.register` **自注册**（装插件即装技能，无需手动复制；旧版 DSH 可兜底手动安装）。
 - **host 半**（`src/index.ts`）：工具注册、WS 端点、每会话状态镜像、信任围栏
   （Host 回环 + trustedHosts + Origin 同源）。
 - **client 半**（`src/client/index.ts`）：订阅 `subscribeState` 回推状态；执行命令；
@@ -28,11 +29,12 @@ Initial release。基于 [requirements.txt](./requirements.txt) 的需求规格�
   `refresh_tree`→文档化 `dsh-sidebar:refresh-files` 事件。
 - **文档与交付物**：README（中文）、CHANGELOG、LICENSE(MIT)、
   `docs/architecture.md`（含设计决策记录与上游扩展建议）、`docs/tools.md`、`docs/usage.md`。
-- **测试**：117 个用例，覆盖推导/协议/桥投递与重放/真实 WS 集成/路径/文件树/
-  工具契约/cordis 挂载/SKILL 契约。
+- **测试**：128 个用例，覆盖推导/协议/桥投递与重放/真实 WS 集成/路径/文件树/
+  工具契约/cordis 挂载（含技能自注册断言）/技能解析与加载/SKILL 契约。
 
 ### 已知限制（见 docs/architecture.md 决策 D1–D6）
 
 - 显隐/展开/收起作用于当前可见 Sidebar（`panelOpen`/`expanded` 为活动会话单份状态）。
 - 标签条上存在一个空 anchor 标签（接入公开 API 的最小侵入方案）。
+- 技能自注册依赖运行时的 `ctx.skills`（0.1.2-rc.1+）；更早版本需手动复制 SKILL.md。
 - 不含 Structured Document 节点操作与语音输入（需求预留，未实现）。

@@ -6,18 +6,20 @@
 [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) v0.18+。
 
 ```bash
-# 1. 安装插件到目标 profile（web 示例）
+# 一条命令装完：插件 + 它自带的 SKILL（host 端会自动注册到技能中心，无需手动复制）
 dsh plugin --profile web add dsh-better-sidebar-controller@latest
-
-# 2. 把 Skill 复制到该 profile 的 skills 目录（让 Agent 学会自然语言 → 工具）
-#    目标目录示例：<dshHome>/profiles/web/.dsh/skills/sidebar-controller/SKILL.md
 ```
 
-重启 DSH 后即可使用。卸载：
+重启 DSH 后即可使用；Agent 的技能目录里会自动出现 `sidebar-controller`。
+卸载（技能随插件一起移除）：
 
 ```bash
 dsh plugin --profile web remove dsh-better-sidebar-controller
 ```
+
+> **旧版 DSH 兜底**：若运行环境没有 `ctx.skills`（0.1.2-rc.1 之前的版本），技能不会
+> 自动注册，请手动把 `skills/sidebar-controller/SKILL.md` 复制到
+> `<dshHome>/profiles/web/.dsh/skills/sidebar-controller/SKILL.md`。
 
 > better-sidebar 是**软依赖**：未安装时本插件的主机端照常工作，但会话侧边栏无法连接，
 > 写操作会返回 `QUEUED`，`get_sidebar_state` 返回 `SIDEBAR_UNAVAILABLE`。

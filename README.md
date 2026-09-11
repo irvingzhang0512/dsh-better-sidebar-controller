@@ -23,11 +23,17 @@ Skill，把 better-sidebar 的既有能力暴露给 DSH Agent——用户说“�
 前置：DSH 0.1.2-rc.1+ 与 dsh-better-sidebar v0.18+。
 
 ```bash
-# 安装到目标 profile（示例：web）
+# 一条命令：插件与其自带的 SKILL 一起装好，无需手动复制任何文件
 dsh plugin --profile web add dsh-better-sidebar-controller@latest
+```
 
-# 复制 Skill 到该 profile 的 skills 目录，让 Agent 学会自然语言 → 工具
-# 目标：<dshHome>/profiles/web/.dsh/skills/sidebar-controller/SKILL.md
+插件主机端在挂载时会把自己打包的 `skills/sidebar-controller/SKILL.md` 注册到
+DSH 技能注册中心（`ctx.skills`），所以**装插件 = 技能自动可用**。若运行环境不支持
+技能自注册（旧版 DSH），仍可按兜底方式手动复制：
+
+```bash
+# 兜底：复制到 Agent 的 skills 目录
+copy skills\sidebar-controller\SKILL.md <dshHome>\profiles\web\.dsh\skills\sidebar-controller\SKILL.md
 ```
 
 ## 工具列表（11 个）
@@ -69,6 +75,9 @@ Agent：reopen_previous_file() → 已打开 meeting.md
                                         ↑ 状态回推（鼠标与 Agent 共用同一份状态）
 ```
 
+技能层：插件 host 端挂载时把打包的 `SKILL.md` 注册进 `ctx.skills`（运行时技能注册中心），
+无需手动安装技能文件；详见 [docs/architecture.md](docs/architecture.md)（决策 D7）。
+
 详见 [docs/architecture.md](docs/architecture.md)，包括桥接协议、投递/重放语义、
 current/previous 推导规则、以及接入 better-sidebar 时的设计决策记录
 （anchor 标签、QUEUED 语义、会话作用域、上游扩展建议）。
@@ -89,6 +98,8 @@ npm pack            # 发布前自验（先跑 build）
 
 - 显隐 / 展开 / 收起作用于**当前可见**的侧边栏（`panelOpen` / `expanded` 是活动会话单份状态）。
 - 标签条上存在一个空的 anchor 标签（获取 store 的最小侵入方案，详见架构文档决策 D1）。
+- 技能自注册依赖运行时的 `ctx.skills`（DSH 0.1.2-rc.1+ 核心服务）；更早版本需手动复制
+  SKILL.md（见安装节兜底）。
 - 不含 Structured Document 节点操作与语音输入（需求预留，当前版本不实现）。
 
 ## 许可

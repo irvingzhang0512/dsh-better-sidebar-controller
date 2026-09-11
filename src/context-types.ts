@@ -11,6 +11,7 @@
  * declaration graph (tools and index import it).
  */
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
+import type { SkillRegistration } from '@deepseek-ai/dsh-skill'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 
 /** The upgrade socket face (structural subset: the destroy the fence uses). */
@@ -53,12 +54,19 @@ export interface Tools {
   register(tool: ToolDefinition): () => void
 }
 
+/** The skills service face (the dsh-skill runtime registry). Optional: an
+ *  older runtime without the registry simply skips skill self-registration. */
+export interface Skills {
+  register(skill: SkillRegistration): () => void
+}
+
 /** The Context this plugin's host half sees. */
 export interface ControllerContextShape {
   webServer: WebServer
   sessions: Sessions
   webRuntime: WebRuntime
   tools: Tools
+  skills?: Skills
 }
 
 export type Context = CordisContext & ControllerContextShape
