@@ -1,0 +1,1032 @@
+# dsh-better-sidebar-controller 需求规格说明书
+
+## 1. 项目概述
+
+### 1.1 项目名称
+
+`dsh-better-sidebar-controller`
+
+### 1.2 项目定位
+
+基于现有 `dsh-better-sidebar` 插件，为 DSH Agent 提供一套可调用的控制能力，使用户可以通过自然语言控制 better-sidebar，包括：
+
+* 查看文件树
+* 展开 / 收起文件夹
+* 打开 / 关闭文件
+* 在已打开文件之间切换
+* 打开 / 关闭 Sidebar
+* 获取当前文件及界面状态
+* 保持当前操作上下文
+
+第一阶段使用文本与 LLM 交互。
+
+后续接入 STT 后，可以直接通过语音完成相同操作。
+
+### 1.3 核心目标
+
+实现：
+
+```text
+自然语言
+   ↓
+DSH Agent
+   ↓
+Controller Skill
+   ↓
+Controller Tools
+   ↓
+better-sidebar
+   ↓
+文件树 / 文件 / Tab 状态变化
+```
+
+用户不需要学习具体 Tool 名称。
+
+例如用户输入：
+
+> 打开今天的会议纪要。
+
+Agent 自动调用对应 Tool，在 better-sidebar 中打开文件。
+
+---
+
+# 2. 设计原则
+
+## 2.1 better-sidebar 负责界面
+
+本插件不重新实现文件树、编辑器、Tab 等 UI。
+
+`dsh-better-sidebar` 继续负责：
+
+* Sidebar UI
+* 文件树
+* 文件展示
+* Tab
+* 文件编辑
+* 用户鼠标操作
+
+`dsh-better-sidebar-controller` 负责：
+
+* Agent Tool
+* 自然语言控制
+* 状态管理
+* 与 better-sidebar 的连接
+
+---
+
+## 2.2 鼠标与 Agent 共用同一状态
+
+用户通过鼠标：
+
+```text
+点击 A.md
+```
+
+与用户通过自然语言：
+
+```text
+“打开 A.md”
+```
+
+最终应该得到完全相同的状态。
+
+不能出现：
+
+```text
+Sidebar 当前显示 A.md
+但 Agent 认为当前文件是 B.md
+```
+
+因此 Controller 必须能够监听 better-sidebar 的状态变化。
+
+---
+
+## 2.3 状态优先
+
+自然语言操作大量依赖：
+
+```text
+这个文件
+当前文件
+刚才那个文件
+这个文件夹
+上一个文件
+```
+
+因此插件必须维护稳定的运行状态。
+
+---
+
+# 3. 系统组成
+
+插件主要包括三部分：
+
+```text
+dsh-better-sidebar-controller
+│
+├─ Controller Tools
+│  Agent 可以调用的实际操作能力
+│
+├─ Controller State / Bridge
+│  状态维护以及与 better-sidebar 通信
+│
+└─ Controller Skill
+   教 LLM 如何根据自然语言调用 Tool
+```
+
+---
+
+# 4. Controller State
+
+## 4.1 当前状态
+
+第一版至少维护：
+
+```text
+Controller State
+
+sidebar_visible
+当前 Sidebar 是否显示
+
+current_file
+当前正在使用的文件
+
+previous_file
+上一个使用的文件
+
+opened_files
+当前已打开文件列表
+
+expanded_folders
+当前展开的文件夹
+
+workspace_root
+当前文件树根目录
+```
+
+其中最重要的是：
+
+```text
+current_file
+```
+
+后续结构化文档插件会以当前文件作为默认操作对象。
+
+---
+
+## 4.2 当前文件规则
+
+没有选中文件时：
+
+```text
+current_file = null
+```
+
+此时只能进行：
+
+* 浏览文件树
+* 展开文件夹
+* 打开文件
+* 新建 / 查找文件等未来能力
+
+当用户打开某个文件：
+
+```text
+current_file = 该文件
+```
+
+例如：
+
+```text
+当前：meeting.md
+```
+
+之后用户说：
+
+> 关闭当前文件。
+
+可以直接作用于 `meeting.md`。
+
+---
+
+## 4.3 文件切换
+
+用户可以随时切换文件：
+
+```text
+meeting.md
+   ↓
+project.md
+   ↓
+source.md
+   ↓
+meeting.md
+```
+
+每次切换都必须同步更新：
+
+```text
+current_file
+previous_file
+```
+
+例如：
+
+```text
+current_file  = project.md
+previous_file = meeting.md
+```
+
+这样用户可以说：
+
+> 回到刚才那个文件。
+
+---
+
+# 5. Controller Tools
+
+Tool 应保持简单、确定、可测试。
+
+不要实现一个万能：
+
+```text
+workspace(command)
+```
+
+而是提供明确的小 Tool。
+
+---
+
+## 5.1 状态查询
+
+### `get_sidebar_state`
+
+获取当前 Controller / Sidebar 状态。
+
+返回至少包括：
+
+```text
+Sidebar 是否显示
+当前文件
+上一个文件
+已打开文件
+已展开文件夹
+Workspace Root
+```
+
+典型自然语言：
+
+> 我现在打开的是哪个文件？
+
+> 有哪些文件开着？
+
+---
+
+## 5.2 Sidebar 控制
+
+### `show_sidebar`
+
+打开 better-sidebar。
+
+自然语言：
+
+> 打开侧边栏。
+
+> 把文件栏打开。
+
+### `hide_sidebar`
+
+隐藏 better-sidebar。
+
+自然语言：
+
+> 把侧边栏关掉。
+
+---
+
+# 6. 文件树操作
+
+## 6.1 `list_files`
+
+读取指定目录下的文件和文件夹。
+
+用途：
+
+* Agent 查找目标文件
+* 用户询问当前目录内容
+
+自然语言：
+
+> docs 下面有什么？
+
+> 看一下当前目录。
+
+---
+
+## 6.2 `expand_folder`
+
+展开文件夹。
+
+自然语言：
+
+> 展开 docs。
+
+> 把会议资料文件夹打开。
+
+---
+
+## 6.3 `collapse_folder`
+
+收起文件夹。
+
+自然语言：
+
+> 把 docs 收起来。
+
+---
+
+## 6.4 `refresh_tree`
+
+刷新当前文件树。
+
+自然语言：
+
+> 刷新一下文件列表。
+
+---
+
+# 7. 文件操作
+
+## 7.1 `open_file`
+
+打开文件。
+
+如果文件尚未打开：
+
+```text
+打开新的 Tab
+↓
+激活该文件
+↓
+current_file = 该文件
+```
+
+如果文件已经打开：
+
+```text
+直接激活现有 Tab
+↓
+current_file = 该文件
+```
+
+因此 Agent 不需要判断文件是否已经打开。
+
+自然语言：
+
+> 打开会议纪要。
+
+> 打开 requirements.md。
+
+---
+
+## 7.2 `activate_file`
+
+切换到已经打开的文件。
+
+主要用于内部明确操作。
+
+自然语言层面：
+
+> 切到项目计划。
+
+可以由 Agent 判断最终使用：
+
+```text
+open_file
+```
+
+或：
+
+```text
+activate_file
+```
+
+用户无需关心区别。
+
+---
+
+## 7.3 `close_file`
+
+关闭文件。
+
+默认可以作用于：
+
+```text
+current_file
+```
+
+也可以显式指定其他已打开文件。
+
+自然语言：
+
+> 把这个文件关掉。
+
+> 关闭会议纪要。
+
+---
+
+## 7.4 `reopen_previous_file`
+
+重新切换到上一个文件。
+
+对应：
+
+```text
+previous_file
+```
+
+自然语言：
+
+> 回到刚才那个文件。
+
+> 切回上一个文件。
+
+该能力也可以由 Skill 使用 `previous_file + open_file` 组合实现。
+
+---
+
+# 8. 第一版暂不实现的文件操作
+
+为了控制范围，V0.1 暂不优先实现：
+
+```text
+创建文件
+删除文件
+移动文件
+复制文件
+文件重命名
+创建文件夹
+删除文件夹
+```
+
+原因：
+
+Controller 第一阶段首先解决：
+
+> Agent 如何可靠地控制 better-sidebar 和当前文件状态。
+
+上述文件系统写操作后续可以继续扩展。
+
+---
+
+# 9. Better Sidebar Bridge
+
+Controller Tool 和 better-sidebar UI 之间需要建立一层 Bridge。
+
+目标：
+
+```text
+Agent Tool
+   ↓
+Controller
+   ↓
+Bridge
+   ↓
+better-sidebar
+```
+
+同时还需要反向同步：
+
+```text
+用户鼠标操作
+   ↓
+better-sidebar
+   ↓
+Bridge
+   ↓
+Controller State
+```
+
+---
+
+## 9.1 Tool → Sidebar
+
+例如：
+
+```text
+open_file("meeting.md")
+```
+
+Controller 应调用 better-sidebar 对应能力：
+
+```text
+打开文件
+激活 Tab
+更新 UI
+```
+
+完成后同步 Controller State。
+
+---
+
+## 9.2 Sidebar → Controller
+
+用户使用鼠标点击：
+
+```text
+project.md
+```
+
+Controller 必须收到状态变化：
+
+```text
+current_file = project.md
+```
+
+因此需要监听 better-sidebar 的：
+
+* 当前激活 Tab
+* 打开的 Tab
+* Sidebar 显示状态
+* 文件树状态
+* 文件夹展开状态
+
+---
+
+# 10. Skill 设计
+
+需要提供一个 `SKILL.md`，教 DSH Agent 如何使用 Controller Tools。
+
+Skill 的主要职责不是实现业务逻辑，而是：
+
+> 将用户自然语言转换成正确的 Tool 调用。
+
+---
+
+## 10.1 基本规则
+
+例如：
+
+```text
+用户：
+“打开 meeting.md”
+
+→ open_file
+```
+
+```text
+用户：
+“切到项目计划”
+
+→ 查找对应文件
+→ open_file / activate_file
+```
+
+```text
+用户：
+“关闭这个文件”
+
+→ current_file
+→ close_file
+```
+
+```text
+用户：
+“回到刚才那个文件”
+
+→ previous_file
+→ open_file
+```
+
+```text
+用户：
+“展开会议资料”
+
+→ expand_folder
+```
+
+---
+
+# 11. 自然语言交互原则
+
+用户不需要说：
+
+```text
+执行 open_file
+```
+
+而应该正常说：
+
+```text
+打开会议纪要
+切到项目计划
+关闭当前文件
+展开 docs
+回到刚才那个
+```
+
+Agent 自动理解并调用对应 Tool。
+
+---
+
+# 12. 语音交互兼容
+
+V0.1 首先使用文本。
+
+但整个设计必须兼容未来 STT。
+
+未来语音：
+
+> 打开会议纪要。
+
+STT 输出：
+
+```text
+打开会议纪要
+```
+
+之后与文本流程完全一致：
+
+```text
+STT
+ ↓
+DSH Agent
+ ↓
+Skill
+ ↓
+Tool
+ ↓
+better-sidebar
+```
+
+Controller 不关心输入来自：
+
+```text
+键盘
+语音
+其他 Agent
+```
+
+---
+
+# 13. 模式设计
+
+第一版不设置：
+
+```text
+进入 Workspace 模式
+进入文件控制模式
+```
+
+默认始终允许自然语言控制。
+
+例如用户直接输入：
+
+> 打开项目计划。
+
+即可执行。
+
+后续纯语音连续记录场景，如果需要区分：
+
+```text
+普通内容
+系统操作
+```
+
+可以增加：
+
+```text
+“操作，打开项目计划。”
+```
+
+这样的语音操作前缀。
+
+该能力不属于本项目 V0.1。
+
+---
+
+# 14. 错误处理
+
+Controller 必须避免 LLM 猜测。
+
+例如用户说：
+
+> 打开会议纪要。
+
+如果存在：
+
+```text
+会议纪要.md
+会议纪要-旧.md
+会议纪要-0911.md
+```
+
+且无法可靠判断，Tool 应返回候选项。
+
+由 Agent询问用户：
+
+```text
+你要打开哪一个？
+```
+
+不能随机打开。
+
+---
+
+## 14.1 文件不存在
+
+返回明确错误：
+
+```text
+FILE_NOT_FOUND
+```
+
+并提供当前可能的候选文件。
+
+---
+
+## 14.2 文件夹不存在
+
+返回：
+
+```text
+FOLDER_NOT_FOUND
+```
+
+---
+
+## 14.3 当前文件为空
+
+例如用户说：
+
+> 关闭当前文件。
+
+但：
+
+```text
+current_file = null
+```
+
+返回：
+
+```text
+NO_CURRENT_FILE
+```
+
+而不是执行未知操作。
+
+---
+
+# 15. Tool 返回结果
+
+Tool 返回结果应尽量结构化。
+
+例如：
+
+```json
+{
+  "success": true,
+  "action": "open_file",
+  "current_file": "docs/meeting.md"
+}
+```
+
+失败：
+
+```json
+{
+  "success": false,
+  "error": "FILE_NOT_FOUND",
+  "message": "未找到文件 meeting.md"
+}
+```
+
+方便 Agent 稳定判断操作结果。
+
+---
+
+# 16. 状态一致性要求
+
+这是本项目的重要验收条件。
+
+必须保证：
+
+```text
+用户鼠标操作
+Agent Tool 操作
+better-sidebar UI
+Controller State
+```
+
+四者始终保持一致。
+
+例如：
+
+```text
+用户鼠标点击 project.md
+```
+
+Controller 应能够立即知道：
+
+```text
+current_file = project.md
+```
+
+反过来：
+
+```text
+Agent 调用 open_file("meeting.md")
+```
+
+Sidebar 必须显示：
+
+```text
+meeting.md
+```
+
+并更新：
+
+```text
+current_file = meeting.md
+```
+
+---
+
+# 17. 建议项目结构
+
+```text
+dsh-better-sidebar-controller/
+│
+├─ src/
+│  ├─ controller/
+│  │  ├─ state
+│  │  ├─ commands
+│  │  └─ types
+│  │
+│  ├─ bridge/
+│  │  └─ better-sidebar
+│  │
+│  ├─ tools/
+│  │  ├─ sidebar
+│  │  ├─ files
+│  │  └─ folders
+│  │
+│  └─ plugin
+│
+├─ skills/
+│  └─ sidebar-controller/
+│     └─ SKILL.md
+│
+├─ tests/
+│
+├─ docs/
+│  ├─ architecture.md
+│  ├─ tools.md
+│  └─ usage.md
+│
+├─ README.md
+├─ CHANGELOG.md
+├─ LICENSE
+└─ package.json
+```
+
+具体目录可以根据 DSH Plugin 规范调整。
+
+---
+
+# 18. 测试要求
+
+至少覆盖以下测试。
+
+### Tool 单元测试
+
+```text
+打开文件
+关闭文件
+切换文件
+展开文件夹
+收起文件夹
+状态查询
+```
+
+### 状态测试
+
+```text
+A → B
+current = B
+previous = A
+```
+
+关闭 B 后状态正确更新。
+
+### Sidebar 同步测试
+
+用户鼠标切换文件后：
+
+```text
+Controller State
+```
+
+正确变化。
+
+### Agent 测试
+
+自然语言：
+
+```text
+“打开会议纪要”
+“关闭这个文件”
+“回到刚才那个”
+“展开 docs”
+```
+
+能够正确调用 Tool。
+
+---
+
+# 19. V0.1 验收标准
+
+完成以下能力即可认为 V0.1 达到目标：
+
+1. Agent 可以获取 better-sidebar 当前状态。
+2. Agent 可以打开 / 隐藏 Sidebar。
+3. Agent 可以读取文件树。
+4. Agent 可以展开 / 收起文件夹。
+5. Agent 可以打开文件。
+6. Agent 可以关闭文件。
+7. Agent 可以在文件之间切换。
+8. Controller 能正确维护 Current File。
+9. 鼠标操作和 Agent 操作能够保持状态同步。
+10. 提供可工作的 `SKILL.md`。
+11. 用户可以直接通过自然语言完成上述操作。
+12. 提供 README、安装说明、使用说明和基础测试。
+
+---
+
+# 20. 发布要求
+
+该项目计划作为独立 Plugin 发布，因此要求：
+
+* 独立 Git 仓库
+* 中文优先文档
+* 代码及公共 API 使用规范英文命名
+* README 提供安装方式
+* README 提供与 `dsh-better-sidebar` 的依赖说明
+* 提供 Tool 列表
+* 提供自然语言使用示例
+* 提供基础架构说明
+* 提供 LICENSE
+* 提供 CHANGELOG
+* 提供版本号
+* 不修改 better-sidebar 核心代码，优先通过公开接口集成
+* 如必须扩展 better-sidebar API，应尽量采用最小修改，并形成明确的上游扩展建议
+
+---
+
+# 21. 后续规划
+
+本插件未来是整个“自然语言 / 语音文档工作台”的基础组件。
+
+后续可能接入：
+
+```text
+dsh-better-sidebar-controller
+               │
+               ▼
+      Structured Document Tool
+               │
+               ▼
+        Document View Plugin
+```
+
+Controller 负责：
+
+> 当前操作哪个文件。
+
+Structured Document Tool 负责：
+
+> 当前文件中的结构如何修改。
+
+未来还会继续增加：
+
+```text
+Current Node
+```
+
+形成：
+
+```text
+Current File
+    ↓
+Current Node
+```
+
+但当前版本不实现结构化文档节点操作。
+
+---
+
+# 22. 一句话定义
+
+`dsh-better-sidebar-controller` 是 `dsh-better-sidebar` 的 Agent 控制层：
+
+> **通过一组稳定的 Tool 和 Skill，让 DSH Agent 可以使用自然语言控制 better-sidebar，并持续维护当前文件及工作区状态。**
