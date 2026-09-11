@@ -87,10 +87,14 @@ current/previous 推导规则、以及接入 better-sidebar 时的设计决策�
 ```bash
 npm install
 npm run typecheck   # tsc 类型检查
-npm run test        # vitest（117 个用例：推导/协议/桥/路径/工具/集成/挂载/Skill 契约）
+npm run test        # vitest（128 个用例：推导/协议/桥/路径/工具/集成/挂载/技能契约）
 npm run build       # host 半 tsc 编译 + client 半 tsdown 浏览器 bundle
 npm pack            # 发布前自验（先跑 build）
 ```
+
+> `lib/`（构建产物）**已提交进仓库**：这样无需 npm 也能用
+> `dsh plugin add "github:irvingzhang0512/dsh-better-sidebar-controller"` 直接安装。
+> 改动源码后请 `npm run build` 并把新的 `lib/` 一并提交。
 
 模块边界与测试策略见 [docs/architecture.md](docs/architecture.md)。
 
