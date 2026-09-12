@@ -18,11 +18,11 @@
  *    registered via the PUBLIC `registerTab` API. This is the minimal,
  *    non-invasive way to mutate `state.expanded` (expand/collapse) and panel
  *    visibility without modifying better-sidebar's core. The anchor renders
- *    nothing; its tab strip pill is an accepted, documented artifact.
+ *    nothing and is removed as soon as the store has been captured.
  */
 import type { Context } from 'dsh-better-sidebar'
 import type { SidebarSnapshot, SidebarStore } from 'dsh-better-sidebar/client/service'
-import { activeTabIdOf, baseName, deriveSidebarState, findTabByPath, type DerivedSidebarState } from '../shared/derive.ts'
+import { activeTabIdOf, allLeaves, baseName, deriveSidebarState, findTabByPath, replacementTabId, type DerivedSidebarState } from '../shared/derive.ts'
 import type { ClientToHostMessage, CommandAck, ControllerCommand, SidebarStateWire } from '../shared/types.ts'
 import { parseHostMessage } from '../shared/wire.ts'
 
@@ -258,7 +258,22 @@ export function apply(ctx: Context): void {
     // pill hijacking the user's active view on every session switch / reload),
     // the anchor is minted at most once per page load — the store capture is
     // global, so later session switches need no second anchor — and the
-    // previously active tab is restored immediately after the open.
+    // previously active tab is restored immediately after the open. Once its
+    // component captures the store, the temporary tab is removed so it cannot
+    // leak into the tab strip or persisted layouts.
+    let anchorCleanupScheduled = false
+
+    const removeAnchor = (snapshot: SidebarSnapshot): void => {
+      if (snapshot.state === undefined || snapshot.sessionId === undefined) return
+      if (!allLeaves(snapshot.state).some(leaf => leaf.tabs.some(tab => tab.id === ANCHOR_TAB_ID))) return
+      const active = activeTabIdOf(snapshot.state)
+      const replacement = active === ANCHOR_TAB_ID
+        ? replacementTabId(snapshot.state, ANCHOR_TAB_ID)
+        : active
+      service.closeTab(ANCHOR_TAB_ID, { sessionId: snapshot.sessionId })
+      if (replacement !== null) service.activateTab(replacement, { sessionId: snapshot.sessionId })
+    }
+
     const disposeAnchor = service.registerTab({
       id: ANCHOR_TYPE,
       hidden: true,
@@ -266,6 +281,13 @@ export function apply(ctx: Context): void {
       title: () => '',
       component: (props) => {
         store = props.store
+        if (!anchorCleanupScheduled) {
+          anchorCleanupScheduled = true
+          queueMicrotask(() => {
+            anchorCleanupScheduled = false
+            if (!closed) removeAnchor(service.getSnapshot())
+          })
+        }
         return null
       },
     })
@@ -274,8 +296,16 @@ export function apply(ctx: Context): void {
      *  tab. A no-op once the store is captured (global capture — later
      *  session switches must not reopen/activate the anchor again). */
     const openAnchorInBackground = (snapshot: SidebarSnapshot): void => {
-      if (store !== undefined) return
-      const previous = snapshot.state === undefined ? null : activeTabIdOf(snapshot.state)
+      if (store !== undefined) {
+        // Also remove anchors persisted by older versions when switching to a
+        // session that has not been visited since this fix was installed.
+        removeAnchor(snapshot)
+        return
+      }
+      const active = snapshot.state === undefined ? null : activeTabIdOf(snapshot.state)
+      const previous = active === ANCHOR_TAB_ID && snapshot.state !== undefined
+        ? replacementTabId(snapshot.state, ANCHOR_TAB_ID)
+        : active
       service.openTab({ type: ANCHOR_TYPE, id: ANCHOR_TAB_ID, title: '' })
       if (previous !== null && sessionId !== undefined) {
         service.activateTab(previous, { sessionId })

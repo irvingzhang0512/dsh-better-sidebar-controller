@@ -18,7 +18,7 @@
  *    registered via the PUBLIC `registerTab` API. This is the minimal,
  *    non-invasive way to mutate `state.expanded` (expand/collapse) and panel
  *    visibility without modifying better-sidebar's core. The anchor renders
- *    nothing; its tab strip pill is an accepted, documented artifact.
+ *    nothing and is removed as soon as the store has been captured.
  */
 import type { Context } from 'dsh-better-sidebar';
 export declare const inject: string[];

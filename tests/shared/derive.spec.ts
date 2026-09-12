@@ -12,6 +12,7 @@ import {
   findTabByPath,
   isEditorFileTab,
   openedFilesOf,
+  replacementTabId,
 } from '../../src/shared/derive.ts'
 import { browserTab, dirTab, editorTab, float, homeTab, leaf, makeState, snapshot, split, terminalTab } from '../helpers/sidebar-fixtures.ts'
 
@@ -69,6 +70,31 @@ describe('activeFileOf', () => {
       bottomSplits: leaf('pane-bottom', [editorTab('tb', B)], 'tb'),
     })
     expect(activeFileOf(state)).toBe(B)
+  })
+})
+
+describe('replacementTabId', () => {
+  it('uses the last non-excluded tab in the active pane', () => {
+    const state = makeState({
+      splits: leaf('pane-1', [homeTab('home'), homeTab('view'), homeTab('anchor')], 'anchor'),
+    })
+    expect(replacementTabId(state, 'anchor')).toBe('view')
+  })
+
+  it('falls back to another pane when the active pane only contains the excluded tab', () => {
+    const state = makeState({
+      activePane: 'pane-2',
+      splits: split('root', [
+        leaf('pane-1', [homeTab('home')], 'home'),
+        leaf('pane-2', [homeTab('anchor')], 'anchor'),
+      ]),
+    })
+    expect(replacementTabId(state, 'anchor')).toBe('home')
+  })
+
+  it('returns null when no user-facing tab remains', () => {
+    const state = makeState({ splits: leaf('pane-1', [homeTab('anchor')], 'anchor') })
+    expect(replacementTabId(state, 'anchor')).toBeNull()
   })
 })
 

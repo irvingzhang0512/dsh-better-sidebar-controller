@@ -45,6 +45,12 @@ export declare function allLeaves(state: SidebarState): SidebarLeaf[];
 export declare function activeFileOf(state: SidebarState): string | null;
 /** The id of the tab currently active in the active pane, or null. */
 export declare function activeTabIdOf(state: SidebarState): string | null;
+/**
+ * Pick the tab that should remain visible when an internal/temporary tab is
+ * removed. Prefer the active pane and its most recently appended tab, matching
+ * better-sidebar's close-tab fallback, then fall back to any other pane.
+ */
+export declare function replacementTabId(state: SidebarState, excludedId: string): string | null;
 /** All open file paths (pane tabs then floats), deduplicated in first-open order. */
 export declare function openedFilesOf(state: SidebarState): string[];
 /**

@@ -85,6 +85,32 @@ export function activeTabIdOf(state: SidebarState): string | null {
   return activeLeaf?.active ?? null
 }
 
+/**
+ * Pick the tab that should remain visible when an internal/temporary tab is
+ * removed. Prefer the active pane and its most recently appended tab, matching
+ * better-sidebar's close-tab fallback, then fall back to any other pane.
+ */
+export function replacementTabId(state: SidebarState, excludedId: string): string | null {
+  const leaves = allLeaves(state)
+  const activeLeaf = leaves.find(leaf => leaf.id === state.activePane)
+  if (activeLeaf !== undefined) {
+    for (let index = activeLeaf.tabs.length - 1; index >= 0; index -= 1) {
+      const tab = activeLeaf.tabs[index]
+      if (tab !== undefined && tab.id !== excludedId) return tab.id
+    }
+  }
+
+  for (const leaf of leaves) {
+    const active = leaf.active === excludedId ? undefined : leaf.tabs.find(tab => tab.id === leaf.active)
+    if (active !== undefined) return active.id
+    for (let index = leaf.tabs.length - 1; index >= 0; index -= 1) {
+      const tab = leaf.tabs[index]
+      if (tab !== undefined && tab.id !== excludedId) return tab.id
+    }
+  }
+  return null
+}
+
 /** All open file paths (pane tabs then floats), deduplicated in first-open order. */
 export function openedFilesOf(state: SidebarState): string[] {
   const out: string[] = []

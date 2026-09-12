@@ -56,7 +56,7 @@ dsh plugin --profile web remove dsh-better-sidebar-controller
 
 1. **显隐 / 展开 / 收起作用于当前可见的侧边栏**：`panelOpen` 与 `expanded` 是活动会话的
    单份状态；跨会话的「打开/关闭/激活文件」不受影响（通过 service scope 支持）。
-2. **anchor 标签**：为捕获 store，侧边栏标签条上会有一个空的小标签（`dsh-better-sidebar-controller:anchor`）。
+2. **anchor 标签**：控制器会短暂创建内部 anchor 以捕获 store，捕获完成后立即移除；它不会常驻侧边栏标签条。
    这是接入 better-sidebar 公开 API 的最小侵入方案，不影响任何功能；上游支持
    `setExpanded` 后即可移除（见 docs/architecture.md 决策 D1）。
 3. **本插件不做**：文件内容编辑、搜索、git 操作、Structured Document 节点操作、语音输入。

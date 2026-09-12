@@ -14,7 +14,7 @@
 - **装插件即装技能**：host 端挂载时把打包的 `skills/sidebar-controller/SKILL.md` 注册进 `ctx.skills`，技能随插件一起装好，无需手动复制任何文件。
 - **better-sidebar 软依赖**：未安装时主机端照常加载。写操作返回 `QUEUED`（已排队，侧边栏可见时自动应用），`get_sidebar_state` 返回 `SIDEBAR_UNAVAILABLE`。
 - **零核心修改**：仅通过公开接口接入——隐藏 anchor 标签页（公开 `registerTab`）+ `service.openFile` / `closeTab` / `activateTab`。
-- **anchor 标签不抢占激活视图**：anchor 标签在后台打开，每个页面加载最多创建一次（store 捕获是全局的），打开后会立即恢复此前的激活标签，不会抢走用户当前的激活视图。
+- **anchor 标签不残留**：anchor 标签仅短暂挂载以捕获 store，随后立即关闭并恢复此前的正常标签；旧版本持久化的空 anchor 也会在会话激活时自动清理。
 
 ## 安装
 

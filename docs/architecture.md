@@ -139,11 +139,12 @@ NO_PREVIOUS_FILE / UNKNOWN_COMMAND / INTERNAL_ERROR`
 better-sidebar 没有公开「改 `state.expanded` / `panelOpen`」的 service 方法；store 实例
 只通过组件 props 暴露。本插件注册一个 `hidden + single` 的 anchor 标签
 （`id: 'dsh-better-sidebar-controller:anchor'`），其 component 挂载时捕获 `props.store`，
-然后用 `store.reduce` 修改 expanded / panelOpen —— 全程只使用**公开**的
+随即关闭该临时标签，然后用 `store.reduce` 修改 expanded / panelOpen —— 全程只使用**公开**的
 `registerTab` API，未修改 better-sidebar 任何核心代码。
 
-代价（已接受并文档化）：标签条上会有一个渲染为空的 pill（anchor 标签）。会话激活时自动打开，
-会话内常驻；隐藏仅表示不出现在「+」菜单，标签条本身没有按标签隐藏的机制（v0.18.0）。
+`hidden` 仅表示不出现在「+」菜单，不能隐藏已经打开的标签（v0.18.0），因此 anchor
+不能常驻。客户端在捕获 store 后通过微任务关闭它并恢复正常标签；切换会话时也会清理
+旧版本持久化布局中遗留的 anchor。
 
 **上游扩展建议**：给 `BetterSidebarService` 增加 `setExpanded(paths)` / `setPanelOpen(open)`
 （或通用的 `reduce`），即可让本插件在后续版本丢弃 anchor。
