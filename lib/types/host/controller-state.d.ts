@@ -8,6 +8,7 @@
 import type { ControllerState, SidebarStateWire } from '../shared/types.ts';
 export declare class ControllerStateStore {
     private states;
+    private listeners;
     /** Merge one client-pushed state wire into the mirror. */
     apply(sessionId: string, wire: SidebarStateWire, workspaceRoot: string | null, now?: number): ControllerState;
     /** Mark a session disconnected while keeping the last known data (stale). */
@@ -16,5 +17,7 @@ export declare class ControllerStateStore {
     get(sessionId: string): ControllerState | undefined;
     /** All mirror entries (test/debug helper). */
     list(): ControllerState[];
+    subscribe(sessionId: string, listener: (state: ControllerState) => void): () => void;
     clear(): void;
+    private emit;
 }

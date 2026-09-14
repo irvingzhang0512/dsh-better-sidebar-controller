@@ -65,4 +65,15 @@ describe('ControllerStateStore', () => {
     store.clear()
     expect(store.list()).toEqual([])
   })
+  it('subscribe publishes current, updated, and disconnected state per session', () => {
+    const store = new ControllerStateStore()
+    const seen: Array<string | null> = []
+    store.apply('s-1', wire(), '/workspace', 1)
+    const off = store.subscribe('s-1', state => seen.push(state.connected ? state.currentFile : null))
+    store.apply('s-1', wire({ currentFile: '/w/b.md' }), '/workspace', 2)
+    store.markDisconnected('s-1')
+    off()
+    store.apply('s-1', wire({ currentFile: '/w/c.md' }), '/workspace', 3)
+    expect(seen).toEqual(['/w/a.md', '/w/b.md', null])
+  })
 })

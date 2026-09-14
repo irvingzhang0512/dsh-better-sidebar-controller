@@ -9,6 +9,7 @@ import type { ControllerState, SidebarStateWire } from '../shared/types.ts'
 
 export class ControllerStateStore {
   private states = new Map<string, ControllerState>()
+  private listeners = new Map<string, Set<(state: ControllerState) => void>>()
 
   /** Merge one client-pushed state wire into the mirror. */
   apply(
@@ -29,6 +30,7 @@ export class ControllerStateStore {
       updatedAt: now,
     }
     this.states.set(sessionId, next)
+    this.emit(sessionId, next)
     return next
   }
 
@@ -36,7 +38,9 @@ export class ControllerStateStore {
   markDisconnected(sessionId: string): void {
     const current = this.states.get(sessionId)
     if (current !== undefined) {
-      this.states.set(sessionId, { ...current, connected: false })
+      const next = { ...current, connected: false }
+      this.states.set(sessionId, next)
+      this.emit(sessionId, next)
     }
   }
 
@@ -50,7 +54,24 @@ export class ControllerStateStore {
     return [...this.states.values()]
   }
 
+  subscribe(sessionId: string, listener: (state: ControllerState) => void): () => void {
+    const set = this.listeners.get(sessionId) ?? new Set<(state: ControllerState) => void>()
+    set.add(listener)
+    this.listeners.set(sessionId, set)
+    const current = this.states.get(sessionId)
+    if (current !== undefined) listener(current)
+    return () => {
+      set.delete(listener)
+      if (set.size === 0) this.listeners.delete(sessionId)
+    }
+  }
+
   clear(): void {
     this.states.clear()
+    this.listeners.clear()
+  }
+
+  private emit(sessionId: string, state: ControllerState): void {
+    for (const listener of this.listeners.get(sessionId) ?? []) listener(state)
   }
 }

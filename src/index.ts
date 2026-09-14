@@ -54,6 +54,11 @@ export const BRIDGE_PATH = '/sidebar-controller/ws'
  */
 export function apply(ctx: Context): void {
   const store = new ControllerStateStore()
+  const removeService = ctx.provide('sidebarController', {
+    id: 'dsh-better-sidebar-controller' as const,
+    getState: (sessionId: string) => store.get(sessionId),
+    subscribe: (sessionId: string, listener: Parameters<ControllerStateStore['subscribe']>[1]) => store.subscribe(sessionId, listener),
+  })
   const bridge = new BridgeServer({
     store,
     resolveWorkspaceRoot: async (sessionId) => {
@@ -125,6 +130,7 @@ export function apply(ctx: Context): void {
   }, 'dsh-better-sidebar-controller: bundled skill')
 
   ctx.effect(() => () => {
+    removeService()
     toolsDisposer()
     bridge.dispose()
     wss.close()
