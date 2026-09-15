@@ -173,6 +173,8 @@ const stateSchema = {
         sidebarVisible: { type: 'boolean' as const, required: true as const, description: '侧边栏是否显示。' },
         currentFile: { type: 'string' as const, description: '当前文件路径（无则省略）。' },
         previousFile: { type: 'string' as const, description: '上一个文件路径（无则省略）。' },
+        fileCandidate: { type: 'string' as const, description: '可供工作台直接操作的明确文件（无则省略）。' },
+        fileCandidateSource: { type: 'string' as const, enum: ['current', 'recent'] as const, description: '候选来自当前浏览或最近浏览。' },
         openedFiles: { type: 'array' as const, items: { type: 'string' as const }, required: true as const, description: '已打开文件列表。' },
         expandedFolders: { type: 'array' as const, items: { type: 'string' as const }, required: true as const, description: '已展开文件夹列表。' },
         workspaceRoot: { type: 'string' as const, description: '工作区根目录（无则省略）。' },
@@ -229,6 +231,8 @@ export interface ControllerStateView {
     sidebarVisible: boolean
     currentFile?: string
     previousFile?: string
+    fileCandidate?: string
+    fileCandidateSource?: 'current' | 'recent'
     openedFiles: string[]
     expandedFolders: string[]
     workspaceRoot?: string
@@ -246,6 +250,8 @@ export function stateView(state: ControllerState | null, connected: boolean): Co
       sidebarVisible: state.sidebarVisible,
       ...(state.currentFile !== null ? { currentFile: state.currentFile } : {}),
       ...(state.previousFile !== null ? { previousFile: state.previousFile } : {}),
+      ...(state.fileCandidate !== null ? { fileCandidate: state.fileCandidate } : {}),
+      ...(state.fileCandidateSource !== null ? { fileCandidateSource: state.fileCandidateSource } : {}),
       openedFiles: state.openedFiles,
       expandedFolders: state.expandedFolders,
       ...(state.workspaceRoot !== null ? { workspaceRoot: state.workspaceRoot } : {}),

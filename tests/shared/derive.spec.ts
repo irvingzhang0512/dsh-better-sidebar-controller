@@ -162,6 +162,8 @@ describe('deriveSidebarState', () => {
     expect(derived.sessionId).toBe('s-1')
     expect(derived.sidebarVisible).toBe(true)
     expect(derived.currentFile).toBe(A)
+    expect(derived.fileCandidate).toBe(A)
+    expect(derived.fileCandidateSource).toBe('current')
     expect(derived.previousFile).toBeNull()
     expect(derived.openedFiles).toEqual([A])
     expect(derived.expandedFolders).toEqual(['/root/docs'])
@@ -183,6 +185,30 @@ describe('deriveSidebarState', () => {
     expect(derived.sidebarVisible).toBe(false)
     expect(derived.currentFile).toBeNull()
     expect(derived.openedFiles).toEqual([])
+    expect(derived.fileCandidate).toBeNull()
+  })
+
+  it('keeps the recently browsed file when a non-file tab becomes active', () => {
+    const file = makeState({ activePane: 'pane-1', splits: leaf('pane-1', [editorTab('a', A)], 'a') })
+    const home = makeState({ activePane: 'pane-1', splits: leaf('pane-1', [editorTab('a', A), homeTab('h')], 'h') })
+    const first = deriveSidebarState(undefined, snapshot('s-1', file))
+    const second = deriveSidebarState(first, snapshot('s-1', home))
+    expect(second.currentFile).toBeNull()
+    expect(second.fileCandidate).toBe(A)
+    expect(second.fileCandidateSource).toBe('recent')
+  })
+
+  it('does not guess an active file from another pane', () => {
+    const state = makeState({
+      activePane: 'pane-1',
+      splits: { kind: 'split', id: 'split', direction: 'horizontal', sizes: [1, 1], children: [
+        leaf('pane-1', [homeTab('h')], 'h'),
+        leaf('pane-2', [editorTab('b', B)], 'b'),
+      ] },
+    })
+    const derived = deriveSidebarState(undefined, snapshot('s-1', state))
+    expect(derived.currentFile).toBeNull()
+    expect(derived.fileCandidate).toBeNull()
   })
 })
 

@@ -41,6 +41,10 @@ export interface ControllerState {
   currentFile: string | null
   /** The file that was current before `currentFile` (for “回到刚才那个文件”). */
   previousFile: string | null
+  /** File offered to direct-manipulation consumers such as the workbench. */
+  fileCandidate: string | null
+  /** Whether the candidate is active now or the most recently browsed open file. */
+  fileCandidateSource: 'current' | 'recent' | null
   /** All currently open files (editor tabs with a path, deduplicated). */
   openedFiles: string[]
   /** Directories currently expanded in the file tree (absolute paths). */
@@ -59,6 +63,8 @@ export interface SidebarStateWire {
   sidebarVisible: boolean
   currentFile: string | null
   previousFile: string | null
+  fileCandidate?: string | null
+  fileCandidateSource?: 'current' | 'recent' | null
   openedFiles: string[]
   expandedFolders: string[]
   updatedAt: number

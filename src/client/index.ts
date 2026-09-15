@@ -69,7 +69,7 @@ export function apply(ctx: Context): void {
       derived = next
       // Only push when something actually changed (panel resize etc. must not
       // spam the bridge); `updatedAt` is excluded from the change guard.
-      const semantic = JSON.stringify([next.sidebarVisible, next.currentFile, next.previousFile, next.openedFiles, next.expandedFolders])
+      const semantic = JSON.stringify([next.sidebarVisible, next.currentFile, next.previousFile, next.fileCandidate, next.fileCandidateSource, next.openedFiles, next.expandedFolders])
       if (semantic === lastSemantic) return
       lastSemantic = semantic
       const wire: SidebarStateWire = {
@@ -77,6 +77,8 @@ export function apply(ctx: Context): void {
         sidebarVisible: next.sidebarVisible,
         currentFile: next.currentFile,
         previousFile: next.previousFile,
+        fileCandidate: next.fileCandidate,
+        fileCandidateSource: next.fileCandidateSource,
         openedFiles: next.openedFiles,
         expandedFolders: next.expandedFolders,
         updatedAt: Date.now(),

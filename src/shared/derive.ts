@@ -32,6 +32,8 @@ export interface DerivedSidebarState extends DerivedFileContext {
   sidebarVisible: boolean
   openedFiles: string[]
   expandedFolders: string[]
+  fileCandidate: string | null
+  fileCandidateSource: 'current' | 'recent' | null
 }
 
 /**
@@ -63,16 +65,10 @@ export function allLeaves(state: SidebarState): SidebarLeaf[] {
 /** The path of the currently active editor file, or null. */
 export function activeFileOf(state: SidebarState): string | null {
   const leaves = allLeaves(state)
-  // Prefer the active pane's active tab; fall back to the first leaf.
-  const activeLeaf = leaves.find(leaf => leaf.id === state.activePane) ?? leaves[0]
+  // Only the active pane is authoritative; another pane would be a guess.
+  const activeLeaf = leaves.find(leaf => leaf.id === state.activePane)
   if (activeLeaf !== undefined && activeLeaf.active !== null) {
     const tab = activeLeaf.tabs.find(t => t.id === activeLeaf.active)
-    if (tab !== undefined && isEditorFileTab(tab)) return tab.path as string
-  }
-  // Fallback: the first leaf whose active tab is an editor file.
-  for (const leaf of leaves) {
-    if (leaf.active === null) continue
-    const tab = leaf.tabs.find(t => t.id === leaf.active)
     if (tab !== undefined && isEditorFileTab(tab)) return tab.path as string
   }
   return null
@@ -157,11 +153,17 @@ export function deriveSidebarState(prev: DerivedSidebarState | undefined, snapsh
   const state = snapshot.state
   const current = state === undefined ? null : activeFileOf(state)
   const fileContext = deriveFileContext(prev, current)
+  const openedFiles = state === undefined ? [] : openedFilesOf(state)
+  const recent = fileContext.previousFile !== null && openedFiles.includes(fileContext.previousFile)
+    ? fileContext.previousFile
+    : null
   return {
     sessionId: snapshot.sessionId ?? null,
     sidebarVisible: state?.panelOpen ?? false,
-    openedFiles: state === undefined ? [] : openedFilesOf(state),
+    openedFiles,
     expandedFolders: state?.expanded ?? [],
+    fileCandidate: current ?? recent,
+    fileCandidateSource: current !== null ? 'current' : recent !== null ? 'recent' : null,
     ...fileContext,
   }
 }
