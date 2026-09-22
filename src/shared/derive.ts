@@ -15,10 +15,9 @@ import type { SidebarSnapshot, SidebarState, SidebarTab } from 'dsh-better-sideb
  * The recursive split-tree shapes are not re-exported by the package's
  * public service subpath; derive them structurally from `SidebarState`.
  */
-type SplitNode = SidebarState['splits']
+type SplitNode = SidebarState['bottomSplits']
 type SidebarLeaf = Extract<SplitNode, { kind: 'leaf' }>
 type SidebarSplit = Extract<SplitNode, { kind: 'split' }>
-type FloatWindow = SidebarState['floats'][number]
 
 /** The file-switch context: current + previous. */
 export interface DerivedFileContext {
@@ -59,7 +58,7 @@ export function leavesOf(node: SplitNode): SidebarLeaf[] {
 
 /** Every leaf across the right panel and the bottom panel. */
 export function allLeaves(state: SidebarState): SidebarLeaf[] {
-  return [...leavesOf(state.splits), ...leavesOf(state.bottomSplits)]
+  return leavesOf(state.bottomSplits)
 }
 
 /** The path of the currently active editor file, or null. */
@@ -121,7 +120,6 @@ export function openedFilesOf(state: SidebarState): string[] {
   for (const leaf of allLeaves(state)) {
     for (const tab of leaf.tabs) visit(tab)
   }
-  for (const float of state.floats) visit(float.tab)
   return out
 }
 
@@ -149,7 +147,7 @@ export function deriveFileContext(prev: DerivedFileContext | undefined, current:
 }
 
 /** Derive the controller state for one snapshot, threading previous/current across calls. */
-export function deriveSidebarState(prev: DerivedSidebarState | undefined, snapshot: SidebarSnapshot): DerivedSidebarState {
+export function deriveSidebarState(prev: DerivedSidebarState | undefined, snapshot: SidebarSnapshot, nativeVisible?: boolean): DerivedSidebarState {
   const state = snapshot.state
   const current = state === undefined ? null : activeFileOf(state)
   const fileContext = deriveFileContext(prev, current)
@@ -159,7 +157,7 @@ export function deriveSidebarState(prev: DerivedSidebarState | undefined, snapsh
     : null
   return {
     sessionId: snapshot.sessionId ?? null,
-    sidebarVisible: state?.panelOpen ?? false,
+    sidebarVisible: nativeVisible ?? state?.bottomOpen ?? false,
     openedFiles,
     expandedFolders: state?.expanded ?? [],
     fileCandidate: current ?? recent,
@@ -177,9 +175,6 @@ export function findTabByPath(state: SidebarState, path: string): SidebarTab | u
   for (const leaf of allLeaves(state)) {
     const tab = leaf.tabs.find(t => isEditorFileTab(t) && t.path === path)
     if (tab !== undefined) return tab
-  }
-  for (const float of state.floats) {
-    if (isEditorFileTab(float.tab) && float.tab.path === path) return float.tab
   }
   return undefined
 }

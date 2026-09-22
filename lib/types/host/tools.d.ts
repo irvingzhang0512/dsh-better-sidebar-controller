@@ -35,6 +35,8 @@ export interface ControllerStateView {
         sidebarVisible: boolean;
         currentFile?: string;
         previousFile?: string;
+        fileCandidate?: string;
+        fileCandidateSource?: 'current' | 'recent';
         openedFiles: string[];
         expandedFolders: string[];
         workspaceRoot?: string;

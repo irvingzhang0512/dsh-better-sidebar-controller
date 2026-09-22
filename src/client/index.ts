@@ -45,6 +45,10 @@ const RECONNECT_DELAY_MS = 2000
 export function apply(ctx: Context): void {
   ctx.effect(() => {
     const service = ctx.betterSidebar
+    const nativeSidebar = () => ctx.get('sidebarRight') as unknown as {
+      isExpanded(): boolean
+      toggleExpanded(): void
+    } | undefined
     let store: SidebarStore | undefined
     let derived: DerivedSidebarState | undefined
     let socket: WebSocket | null = null
@@ -55,6 +59,7 @@ export function apply(ctx: Context): void {
     let failures = 0
     let lastSemantic: string | undefined
     let lastIntentionallyClosed: string | null = null
+    let anchorOriginalBottomOpen: boolean | undefined
 
     const send = (message: ClientToHostMessage): void => {
       if (socket !== null && socket.readyState === WebSocket.OPEN) {
@@ -65,7 +70,7 @@ export function apply(ctx: Context): void {
     const pushState = (): void => {
       if (sessionId === undefined) return
       const snapshot = service.getSnapshot()
-      const next = deriveSidebarState(derived, snapshot)
+      const next = deriveSidebarState(derived, snapshot, nativeSidebar()?.isExpanded())
       derived = next
       // Only push when something actually changed (panel resize etc. must not
       // spam the bridge); `updatedAt` is excluded from the change guard.
@@ -151,16 +156,18 @@ export function apply(ctx: Context): void {
     const handleCommand = (id: string, command: ControllerCommand): void => {
       switch (command.name) {
         case 'show_sidebar': {
-          const s = store
-          if (s === undefined) return storeUnavailable(id)
-          s.reduce(state => (state.panelOpen ? state : { ...state, panelOpen: true }))
+          const sidebar = nativeSidebar()
+          if (sidebar === undefined) return storeUnavailable(id)
+          if (!sidebar.isExpanded()) sidebar.toggleExpanded()
+          pushState()
           ack(id, { ok: true, code: 'OK', message: '侧边栏已打开。', value: { sidebarVisible: true } })
           break
         }
         case 'hide_sidebar': {
-          const s = store
-          if (s === undefined) return storeUnavailable(id)
-          s.reduce(state => (!state.panelOpen ? state : { ...state, panelOpen: false }))
+          const sidebar = nativeSidebar()
+          if (sidebar === undefined) return storeUnavailable(id)
+          if (sidebar.isExpanded()) sidebar.toggleExpanded()
+          pushState()
           ack(id, { ok: true, code: 'OK', message: '侧边栏已关闭。', value: { sidebarVisible: false } })
           break
         }
@@ -274,6 +281,10 @@ export function apply(ctx: Context): void {
         : active
       service.closeTab(ANCHOR_TAB_ID, { sessionId: snapshot.sessionId })
       if (replacement !== null) service.activateTab(replacement, { sessionId: snapshot.sessionId })
+      if (anchorOriginalBottomOpen === false && store !== undefined) {
+        store.reduce(state => state.bottomOpen ? { ...state, bottomOpen: false } : state)
+      }
+      anchorOriginalBottomOpen = undefined
     }
 
     const disposeAnchor = service.registerTab({
@@ -308,6 +319,7 @@ export function apply(ctx: Context): void {
       const previous = active === ANCHOR_TAB_ID && snapshot.state !== undefined
         ? replacementTabId(snapshot.state, ANCHOR_TAB_ID)
         : active
+      anchorOriginalBottomOpen = snapshot.state?.bottomOpen
       service.openTab({ type: ANCHOR_TYPE, id: ANCHOR_TAB_ID, title: '' })
       if (previous !== null && sessionId !== undefined) {
         service.activateTab(previous, { sessionId })
@@ -331,11 +343,13 @@ export function apply(ctx: Context): void {
     }
 
     const offState = service.subscribeState(onChange)
+    const nativeStateTimer = window.setInterval(pushState, 500)
     onChange()
 
     return () => {
       closed = true
       offState()
+      window.clearInterval(nativeStateTimer)
       disposeAnchor()
       window.clearTimeout(retryTimer)
       if (socket !== null) {

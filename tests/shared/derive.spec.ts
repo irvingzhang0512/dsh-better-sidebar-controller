@@ -14,7 +14,7 @@ import {
   openedFilesOf,
   replacementTabId,
 } from '../../src/shared/derive.ts'
-import { browserTab, dirTab, editorTab, float, homeTab, leaf, makeState, snapshot, split, terminalTab } from '../helpers/sidebar-fixtures.ts'
+import { browserTab, dirTab, editorTab, homeTab, leaf, makeState, snapshot, split, terminalTab } from '../helpers/sidebar-fixtures.ts'
 
 const A = '/root/a.md'
 const B = '/root/b.md'
@@ -111,10 +111,9 @@ describe('openedFilesOf', () => {
     })
     expect(openedFilesOf(state)).toEqual([A])
   })
-  it('includes floating windows', () => {
+  it('includes files from split panes', () => {
     const state = makeState({
-      splits: leaf('pane-1', [editorTab('t1', A)], 't1'),
-      floats: [float('f1', editorTab('t2', B))],
+      splits: split('root', [leaf('pane-1', [editorTab('t1', A)], 't1'), leaf('pane-2', [editorTab('t2', B)], 't2')]),
     })
     expect(openedFilesOf(state)).toEqual([A, B])
   })
@@ -217,10 +216,9 @@ describe('findTabByPath', () => {
     const state = makeState({ splits: leaf('pane-1', [editorTab('t1', A)], 't1') })
     expect(findTabByPath(state, A)?.id).toBe('t1')
   })
-  it('searches floats after panes', () => {
+  it('searches other bottom panes', () => {
     const state = makeState({
-      splits: leaf('pane-1', [homeTab('h')]),
-      floats: [float('f1', editorTab('t2', B))],
+      splits: split('root', [leaf('pane-1', [homeTab('h')]), leaf('pane-2', [editorTab('t2', B)])]),
     })
     expect(findTabByPath(state, B)?.id).toBe('t2')
   })

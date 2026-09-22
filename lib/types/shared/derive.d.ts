@@ -14,7 +14,7 @@ import type { SidebarSnapshot, SidebarState, SidebarTab } from 'dsh-better-sideb
  * The recursive split-tree shapes are not re-exported by the package's
  * public service subpath; derive them structurally from `SidebarState`.
  */
-type SplitNode = SidebarState['splits'];
+type SplitNode = SidebarState['bottomSplits'];
 type SidebarLeaf = Extract<SplitNode, {
     kind: 'leaf';
 }>;
@@ -29,6 +29,8 @@ export interface DerivedSidebarState extends DerivedFileContext {
     sidebarVisible: boolean;
     openedFiles: string[];
     expandedFolders: string[];
+    fileCandidate: string | null;
+    fileCandidateSource: 'current' | 'recent' | null;
 }
 /**
  * Whether a tab is an open FILE (an editor tab carrying a path that is not a
@@ -66,7 +68,7 @@ export declare function openedFilesOf(state: SidebarState): string[];
  */
 export declare function deriveFileContext(prev: DerivedFileContext | undefined, current: string | null): DerivedFileContext;
 /** Derive the controller state for one snapshot, threading previous/current across calls. */
-export declare function deriveSidebarState(prev: DerivedSidebarState | undefined, snapshot: SidebarSnapshot): DerivedSidebarState;
+export declare function deriveSidebarState(prev: DerivedSidebarState | undefined, snapshot: SidebarSnapshot, nativeVisible?: boolean): DerivedSidebarState;
 /**
  * Find the first open tab whose path matches (pane tabs first, then floats).
  * Used by close/activate to map a path to the service's tab id. Returns

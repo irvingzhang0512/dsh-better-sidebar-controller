@@ -3,7 +3,7 @@
  * mirror the published better-sidebar shapes (see its lib/types) so the pure
  * derivation logic can be exercised without a browser.
  */
-import type { FloatWindow, SidebarLeaf, SidebarSnapshot, SidebarSplit, SidebarState, SidebarTab, SplitNode } from 'dsh-better-sidebar/client/service'
+import type { SidebarLeaf, SidebarSnapshot, SidebarSplit, SidebarState, SidebarTab, SplitNode } from 'dsh-better-sidebar/client/service'
 
 /** A plain editor file tab. */
 export function editorTab(id: string, path: string, extra: Partial<SidebarTab> = {}): SidebarTab {
@@ -40,28 +40,21 @@ export function split(id: string, children: SplitNode[], dir: 'row' | 'col' = 'r
   return { kind: 'split', id, dir, sizes: children.map(() => 1 / children.length), children }
 }
 
-/** A free floating window. */
-export function float(id: string, tab: SidebarTab): FloatWindow {
-  return { id, tab, x: 0, y: 0, w: 390, h: 780 }
-}
-
 /** A minimal valid SidebarState; override the bits each test cares about. */
-export function makeState(overrides: Partial<SidebarState> = {}): SidebarState {
+export function makeState(overrides: Partial<SidebarState> & { splits?: SplitNode; panelOpen?: boolean } = {}): SidebarState {
+  const { splits, panelOpen, ...rest } = overrides
   return {
-    panelOpen: true,
-    width: 400,
     activePane: 'pane-1',
     nextTerminal: 0,
     nextBrowser: 0,
     expanded: [],
     revealed: [],
-    splits: leaf('pane-1', [homeTab('t-home')], 't-home'),
-    bottomOpen: false,
+    bottomOpen: panelOpen ?? false,
     bottomHeight: 220,
     bottomOpenedOnce: false,
-    bottomSplits: leaf('pane-bottom', [], null),
-    floats: [],
-    ...overrides,
+    bottomSplits: splits ?? leaf('pane-1', [homeTab('t-home')], 't-home'),
+    agentWaits: {},
+    ...rest,
   }
 }
 
