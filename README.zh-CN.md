@@ -1,5 +1,8 @@
 [English](README.md) | **简体中文**
 
+当前功能与验收以 [docs/SPEC.md](docs/SPEC.md) 为入口；原始需求保留为历史来源，技术契约见规格内的文档索引。功能任务先改规格再实现，Bug 按已有预期查源码修复。
+
+
 # dsh-better-sidebar-controller
 
 **dsh-better-sidebar 的 Agent 控制层。**
