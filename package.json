@@ -1,6 +1,6 @@
 {
   "name": "dsh-better-sidebar-controller",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH plugin: 基于 dsh-better-sidebar 的 Agent 控制层——通过一组稳定的 Tool 与 Skill，让 Agent 可以用自然语言控制侧边栏文件工作区（State / Bridge / Tools / Skill）。",
   "type": "module",
   "repository": {
