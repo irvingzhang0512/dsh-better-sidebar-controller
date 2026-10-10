@@ -37,7 +37,8 @@
 - 参数：`path?`（要列出的目录，相对或绝对；省略 = 工作区根目录）。
 - 返回：`path`、`entries[]`（`name` / `path` / `isDir` / `hidden` / `isSymlink` /
   `broken`）、`truncated`。
-- 说明：单层列举；目录优先、大小写不敏感排序；隐藏文件带 `hidden: true`。
+- 说明：单层列举；目录优先、大小写不敏感排序；隐藏文件带 `hidden: true`。行为受侧边卡片设置
+  `includeHiddenEntries`／`maxListedEntries` 影响（默认返回隐藏项、上限 1000；见 [SPEC.md](SPEC.md) 的 F009）。
 
 ### 5. `expand_folder`
 - 参数：`path`（文件夹路径，相对或绝对）。

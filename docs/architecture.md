@@ -114,6 +114,44 @@ Controller State（host 镜像，工具返回）：
 `PATH_OUTSIDE_WORKSPACE`。目录列举（`fs-tree.ts`）自包含复刻 better-sidebar 语义：
 opendir 流式、目录优先 + 大小写不敏感排序、隐藏点前缀标记、符号链接探测、行数上限截断。
 
+## 配置契约（侧边卡片设置）
+
+本插件不在自己的 cordis 配置里声明用户可调项，而是复用 [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar)
+注册的「设置 → 侧边卡片」页（slot `settings.section`）。该页为**每个已注册 tab 描述符**渲染一张卡片
+（清单是 `[...service.getTabs()].sort(tabOrder)`，不过滤 `hidden`），卡片可声明
+`TabDescriptor.settings.pluginToggles` 设置行（v0.12.0+，能力名 `pluginSettings`）：键是**插件本地键**，
+值持久化在 better-sidebar 自己的用户设置文档的 `pluginSettings[<描述符 id>]` 下，行控件支持
+`switch` / `text` / `number` / `select`。
+
+本插件唯一的描述符是隐藏锚点 tab（`dsh-better-sidebar-controller:anchor`，`hidden + single`），
+因此配置键为 `pluginSettings['dsh-better-sidebar-controller:anchor']`：
+
+| 字段 | 控件 | 默认 | 作用 |
+| --- | --- | --- | --- |
+| `includeHiddenEntries` | `switch` | `true` | 单层列举是否返回点开头的隐藏项（返回时仍带 `hidden` 标记） |
+| `maxListedEntries` | `number`（`min: 1`） | `1000` | 单层列举行数上限，超出时结果标 `truncated` |
+
+两项作用于 `list_files` 与 `refresh_tree` 共用的单层列举（`fs-tree.ts` 的 `maxEntries` 默认值）。
+`ackTimeoutMs`（桥接等待 ack 的默认 4s）**不进卡片**：它是宿主组装层的工程参数（`src/index.ts` 传给
+`registerControllerTools` 的 `BRIDGE_ACK_TIMEOUT_MS`），用户日常不会调整，继续留在组装层配置。
+
+**读取与生效**：浏览器半边通过公开 service 快照读
+`service.getSnapshot().prefs.pluginSettings['dsh-better-sidebar-controller:anchor']`，并用
+`service.subscribe` / `service.subscribeState` 跟踪变化；两项值经既有桥接同步给宿主半边
+（客户端→宿主的 `state` 推送需新增可选字段，见 `src/shared/wire.ts`），宿主在下一次
+`list_files` / `refresh_tree` 调用时使用。无客户端连接时宿主按默认值列举，不失败。
+
+**降级**：better-sidebar 缺失，或版本低于 0.12.0（能力列表 `service.features` 不含 `pluginSettings`，
+老版本可能没有该字段）时，两项回退硬编码默认值（返回隐藏项、上限 1000），插件与 11 个工具照常工作；
+只依赖公开 service，不访问私有 store。
+
+**上游机制的已知限制**（如实记录，非本插件可改）：卡片上的设置行只在卡片启用
+（`tabsEnabled[id] !== false`）时渲染；该机制没有「重置为默认／标记被覆盖」与 revision 冲突保护；
+tab 卡片的第二行固定显示描述符 id（`desc: tab.id`），描述符的 `description` 不在卡片上渲染
+（它只用于宿主「+」菜单的引导列表，而锚点是 `hidden`，不会出现）——所以锚点卡片的可见修正是**标题**。
+锚点自身的启用开关也是上游统一行为：关闭后上游 `openTab` 拒绝并 `console.warn`，锚点无法挂载、
+store 捕获失败，依赖 store 的显隐／展开类命令随之不可用。
+
 ## 会话作用域
 
 - 工具通过 `exec.agent.session.id` 绑定调用会话（模型永远不传 sessionId）。

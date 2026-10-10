@@ -80,11 +80,33 @@
 - 来源依据：[../requirements.txt](../requirements.txt)。
 - 验证记录：未实现，暂无运行验证；实际开发时先拆分规格并明确异常反馈。
 
+## F009 侧边卡片设置（列举行为配置）
+
+- 实现状态：待实现（2026-10-10 规格增量，用户确认该版文档后开发）。
+- 场景与预期：在「设置 → 侧边卡片」（第三方插件 `dsh-better-sidebar` 注册的 `settings.section` 页）里，本插件的卡片提供两个设置行，控制文件列举行为：`includeHiddenEntries`（开关，默认 `true`，是否返回点开头的隐藏项，返回时仍带 `hidden` 标记）与 `maxListedEntries`（数字，默认 `1000`，最小 `1`，单层列举行数上限，超出时结果标 `truncated`）。两项作用于 `list_files` 与 `refresh_tree` 共用的单层列举。该卡片现在是**空白标题**的行（描述符 `title: () => ''`，而该页的 tab 卡片不过滤 `hidden`、也不像 viewer 卡片那样回退 id），本规格要求给描述符正式标题（暂拟「文件树与列表」，待用户确认）。
+- 边界与异常：
+  - 软依赖：`dsh-better-sidebar` 缺失，或版本低于 0.12.0（能力列表 `service.features` 不含 `pluginSettings`，老版本可能没有该字段）时，两项回退现有硬编码默认值（返回隐藏项、上限 1000），插件与其 11 个工具照常工作；只通过公开 service 快照读取（`getSnapshot().prefs.pluginSettings[<描述符 id>]`）与订阅（`subscribe`／`subscribeState`）跟踪变化，不访问私有 store。
+  - 优先级：设置过就用它，未设置回落默认值；该上游机制没有「重置为默认／标记被覆盖」与 revision 冲突保护。
+  - 设置行只在卡片启用时渲染（上游条件为 `tabsEnabled[id] !== false` 且描述符声明了任一行／自定义面板）。
+  - 锚点生命周期约束不变：抓取 store、后台建标签不抢用户活动标签、清理与会话切换、已有文件标签恢复都保持现状；给锚点加标题与设置行不得改变这些行为，也不得让它出现在「+」新建菜单里（仍是 `hidden: true`）。
+  - `list_files` 的既有返回形状（目录优先排序、`hidden`／`broken`／`truncated` 标记）不变，只是行数与隐藏项受配置控制。
+  - 过滤与截断顺序：先按 `includeHiddenEntries` 过滤，再按 `maxListedEntries` 计数截断（否则隐藏项会吃掉配额）；`truncated` 表示仍有未返回的行。
+  - 值需要送达宿主：prefs 在浏览器侧（better-sidebar 的用户设置文档），而 `list_files`／`refresh_tree` 在宿主执行；客户端半边经既有桥接把两项同步给宿主，`src/shared/wire.ts` 新增可选字段承载（用户已于 2026-10-10 确认采用该路径，不改为宿主直接读 better-sidebar 命名空间）。无客户端连接时宿主按默认值列举，不失败。
+  - 取值防御：宿主读取时对非有限值、小于 1 的值回落默认 1000；布尔非 `true` 视为关闭。上游数字行对无法解析的输入回落到当前值、并按声明的 `min` 夹取。
+  - 卡片第二行显示的是描述符 id（上游对 tab 卡片固定用 `desc: tab.id`），描述符的 `description` **不在卡片上**渲染（它只出现在宿主「+」菜单的引导列表，而锚点是 `hidden`，不会出现）；因此本条的可见修正是标题。
+  - 锚点卡片的启用开关是上游统一行为：关闭后上游 `openTab` 会拒绝（`console.warn`），锚点无法挂载、store 捕获失败，依赖 store 的显隐／展开类命令随之不可用。本规格不修改该上游行为，只如实记录。
+  - 两项是 better-sidebar 的用户设置（全局），不按会话隔离；宿主镜像不因此新增每会话字段。
+- 验收条件：默认（未设置）行为与当前一致（列出隐藏项、上限 1000、`truncated` 语义不变）；关闭 `includeHiddenEntries` 后 `list_files`／`refresh_tree` 不再返回点开头条目，且非隐藏条目数不因隐藏项占位而减少；`maxListedEntries` 设为 3 时单层最多返回 3 行并标 `truncated`，设为 0／非法值时回落 1000 或按 `min` 夹取且不报错；卡片上能看到正式标题与两个设置行；未安装 better-sidebar 或版本不支持时宿主仍能列目录并保持默认行为；设置改动后在**下一次**工具调用生效，不需要重载插件。
+- 实现依据：待实现；预期改动 [../src/client/index.ts](../src/client/index.ts)（描述符标题、`pluginToggles` 两行、读回 prefs 并同步宿主）、[../src/host/tools.ts](../src/host/tools.ts)（`list_files`／`refresh_tree` 行为）、[../src/host/fs-tree.ts](../src/host/fs-tree.ts)（`maxEntries` 默认与隐藏项过滤）、[../src/shared/wire.ts](../src/shared/wire.ts)（新增可选字段承载客户端→宿主的同步，已确认需要）。
+- 验证记录：本版为文档增量，未运行任何验证。
+
 ## 差异与验证待办
 
 - 新补 AGENTS.md，保留实际 master 分支；lib/ 在本仓库是已跟踪产物，文档任务不运行构建去改写它。
 - 原生 sidebar store 与隐藏锚点已新增构建产物级回归用例（两种落点）；真实浏览器 GUI 回归仍待执行。
+- 2026-10-10 增量待办：F009 尚无实现与验证。已定事项：①锚点卡片的正式名称按暂拟「文件树与列表」定稿（实现前仍可改）；②客户端→宿主的同步走 [../src/shared/wire.ts](../src/shared/wire.ts) 新增可选字段（用户已确认，不改为宿主直接读 better-sidebar 命名空间）；③锚点卡片启用开关关闭会让 store 捕获失败（上游拒绝 `openTab`）这一上游边界只在本文档与 architecture.md 如实记录，不额外写进开发 Skill，也不修改上游行为。
 
 ## 规格变更记录
 
 - 2026-10-03：首次从现行文档、实现和现有测试建立功能基线；仅修改维护文档，未变更 API、存储或运行逻辑。
+- 2026-10-10：新增 F009 侧边卡片设置（列举行为配置：`includeHiddenEntries`／`maxListedEntries`，以及锚点描述符的正式标题）；配置契约同步到 [architecture.md](architecture.md) 的「配置契约」，`list_files` 说明同步到 [tools.md](tools.md)。本版为待用户确认的文档增量，未改动源码、测试或运行配置、未重创 `lib/`。
