@@ -26,8 +26,28 @@ export type ListDirectoryResult = {
     code: 'NOT_A_DIRECTORY' | 'FILE_NOT_FOUND' | 'FS_ERROR';
     message: string;
 };
-/** List one directory level, returning a structured result. */
-export declare function listDirectorySafe(path: string, maxEntries?: number): Promise<ListDirectoryResult>;
+/**
+ * Options of one level listing (SPEC F009 侧边卡片设置).
+ *
+ * Order matters and is deliberate: entries are filtered by
+ * `includeHiddenEntries` FIRST, then counted against `maxListedEntries` —
+ * hidden rows must not eat the visible rows' quota. `truncated` therefore
+ * means "there are more ELIGIBLE rows than the bound", not "the directory
+ * has more rows".
+ */
+export interface ListDirectoryOptions {
+    /** Return dot-prefixed rows (still flagged `hidden`); default true. */
+    includeHiddenEntries?: boolean;
+    /** Row bound of this level; default 1000. */
+    maxListedEntries?: number;
+}
+/**
+ * List one directory level, returning a structured result.
+ *
+ * Accepts a bare number for backward compatibility (older call sites passed
+ * `listDirectorySafe(path, 2)`).
+ */
+export declare function listDirectorySafe(path: string, options?: number | ListDirectoryOptions): Promise<ListDirectoryResult>;
 /**
  * Whether `target` lies under `base` (or equals it), tolerant of separator
  * style and — on Windows, where the filesystem is case-insensitive — of

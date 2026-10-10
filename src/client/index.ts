@@ -19,11 +19,15 @@
  *    non-invasive way to mutate `state.expanded` (expand/collapse) and panel
  *    visibility without modifying better-sidebar's core. The anchor renders
  *    nothing and is removed as soon as the store has been captured.
+ * 4. Settings mirror — the same anchor descriptor carries this plugin's
+ *    side-card listing settings (SPEC F009); the client reads them from the
+ *    public service snapshot and pushes them to the host, where the actual
+ *    directory listing runs.
  */
 import type { Context } from 'dsh-better-sidebar'
 import type { SidebarSnapshot, SidebarStore } from 'dsh-better-sidebar/client/service'
 import { activeTabIdOf, allLeaves, baseName, deriveSidebarState, findTabByPath, replacementTabId, type DerivedSidebarState } from '../shared/derive.ts'
-import type { ClientToHostMessage, CommandAck, ControllerCommand, SidebarStateWire } from '../shared/types.ts'
+import { LISTING_SETTINGS_DEFAULTS, MAX_LISTED_ENTRIES_MIN, type ClientToHostMessage, type CommandAck, type ControllerCommand, type ListingSettings, type SidebarStateWire } from '../shared/types.ts'
 import { parseHostMessage } from '../shared/wire.ts'
 
 export const inject = ['betterSidebar']
@@ -32,6 +36,16 @@ export const inject = ['betterSidebar']
 const ANCHOR_TYPE = 'dsh-better-sidebar-controller:anchor'
 /** The anchor tab's stable id (dedupes on reopen / restore). */
 const ANCHOR_TAB_ID = 'dsh-better-sidebar-controller:anchor'
+/**
+ * The anchor descriptor's formal name (SPEC F009「文件树与列表」).
+ *
+ * The side-card settings page renders ONE card per registered tab descriptor
+ * WITHOUT filtering `hidden`, so this hidden anchor is also the card that
+ * carries this plugin's two listing settings — and its title is the only
+ * visible part actually under our control (the card's second line is fixed
+ * to the descriptor id upstream, and `description` is not rendered on cards).
+ */
+const ANCHOR_TITLE = '文件树与列表'
 /** Bridge upgrade path (must match the host half). */
 const BRIDGE_PATH = '/sidebar-controller/ws'
 /** Reconnect cap so a refused endpoint never spins forever. */
@@ -58,13 +72,18 @@ export function apply(ctx: Context): void {
     let closed = false
     let failures = 0
     let lastSemantic: string | undefined
+    /** Last settings blob pushed (SPEC F009 change guard). */
+    let lastSettingsKey: string | undefined
     let lastIntentionallyClosed: string | null = null
     let anchorOriginalBottomOpen: boolean | undefined
 
-    const send = (message: ClientToHostMessage): void => {
+    /** Send one message; returns whether it actually went out (socket OPEN). */
+    const send = (message: ClientToHostMessage): boolean => {
       if (socket !== null && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message))
+        return true
       }
+      return false
     }
 
     const pushState = (): void => {
@@ -95,6 +114,64 @@ export function apply(ctx: Context): void {
       send({ type: 'command-result', result: { id, ...result } })
     }
 
+    /**
+     * Read this plugin's own settings blob out of a snapshot (SPEC F009).
+     *
+     * Read-only through the PUBLIC service snapshot (`prefs.pluginSettings`),
+     * never the private store; every level is probed because the blob is an
+     * open map owned by better-sidebar's prefs document and an older
+     * better-sidebar (< 0.12.0) may carry no `pluginSettings` at all. A
+     * snapshot that throws or omits prefs degrades to the defaults, so the
+     * listing behavior stays at the pre-F009 contract.
+     */
+    const settingsFromSnapshot = (snapshot: SidebarSnapshot): ListingSettings => {
+      let blob: unknown
+      try {
+        const pluginSettings = (snapshot as { prefs?: { pluginSettings?: unknown } }).prefs?.pluginSettings
+        blob = (pluginSettings !== null && typeof pluginSettings === 'object')
+          ? (pluginSettings as Record<string, unknown>)[ANCHOR_TAB_ID]
+          : undefined
+      } catch {
+        blob = undefined
+      }
+      const record = (blob !== null && typeof blob === 'object' && !Array.isArray(blob))
+        ? blob as Record<string, unknown>
+        : {}
+      const bound = record.maxListedEntries
+      return {
+        // Unset key → documented default (hidden rows returned); a present
+        // value counts as ON only when it is literally true.
+        includeHiddenEntries: record.includeHiddenEntries === undefined
+          ? LISTING_SETTINGS_DEFAULTS.includeHiddenEntries
+          : record.includeHiddenEntries === true,
+        maxListedEntries: typeof bound === 'number' && Number.isFinite(bound)
+          ? Math.max(MAX_LISTED_ENTRIES_MIN, Math.floor(bound))
+          : LISTING_SETTINGS_DEFAULTS.maxListedEntries,
+      }
+    }
+
+    /**
+     * Mirror the two listing settings to the host when they CHANGE.
+     *
+     * The bridge carries them on their own `settings` message rather than
+     * inside the state push, because a settings-only change leaves the
+     * semantic state identical (the state push's change guard would swallow
+     * it). The host falls back to the defaults when no client ever pushed,
+     * so a missing mirror never breaks listing.
+     */
+    const pushSettings = (): void => {
+      if (sessionId === undefined) return
+      const next = settingsFromSnapshot(service.getSnapshot())
+      const key = JSON.stringify(next)
+      if (key === lastSettingsKey) return
+      // Only remember the value once it actually went out: a push attempted
+      // while the socket is still CONNECTING would otherwise mark the
+      // settings as synced and the `onopen` retry would skip them — leaving
+      // the host on stale defaults after a page reload.
+      if (!send({ type: 'settings', settings: next })) return
+      lastSettingsKey = key
+    }
+
     const connect = (targetSessionId: string): void => {
       if (closed) return
       // Only the ACTIVE session keeps a live bridge: drop any prior socket so
@@ -115,6 +192,7 @@ export function apply(ctx: Context): void {
         attachedSession = targetSessionId
         failures = 0
         send({ type: 'hello', sessionId: targetSessionId })
+        pushSettings()
         pushState()
       }
       ws.onmessage = (event) => {
@@ -310,7 +388,28 @@ export function apply(ctx: Context): void {
       id: ANCHOR_TYPE,
       hidden: true,
       single: true,
-      title: () => '',
+      title: () => ANCHOR_TITLE,
+      // SPEC F009: the two single-level listing settings. They live in
+      // better-sidebar's own prefs document under `pluginSettings[<id>]`
+      // (plugin-local keys, v0.12.0+), and the client mirrors them to the
+      // host — the listing itself runs on the host half.
+      settings: {
+        pluginToggles: [
+          {
+            key: 'includeHiddenEntries',
+            type: 'switch',
+            title: '列出隐藏项',
+            desc: '开启时单层列举返回点开头的隐藏条目（仍带 hidden 标记）；关闭后过滤它们，且不占用行数上限。',
+          },
+          {
+            key: 'maxListedEntries',
+            type: 'number',
+            min: MAX_LISTED_ENTRIES_MIN,
+            title: '单层条目上限',
+            desc: '单层列举最多返回的行数；超出时结果标记 truncated。默认 1000。',
+          },
+        ],
+      },
       component: (props) => {
         store = props.store
         if (!anchorCleanupScheduled) {
@@ -352,12 +451,16 @@ export function apply(ctx: Context): void {
       const nextSession = snapshot.sessionId
       if (nextSession !== sessionId) {
         sessionId = nextSession
+        // Settings are better-sidebar USER settings (global), but the host
+        // mirror is per session — re-push for the newly active one.
+        lastSettingsKey = undefined
         if (nextSession !== undefined) {
           openAnchorInBackground(snapshot)
           if (socket === null) connect(nextSession)
           else if (attachedSession !== nextSession) connect(nextSession)
         }
       }
+      pushSettings()
       pushState()
     }
 

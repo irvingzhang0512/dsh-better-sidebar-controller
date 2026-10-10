@@ -10,6 +10,7 @@ import type {
   ControllerCommand,
   ControllerCode,
   HostToClientMessage,
+  ListingSettings,
   SidebarStateWire,
 } from './types.ts'
 import { CONTROLLER_COMMAND_NAMES } from './types.ts'
@@ -36,6 +37,30 @@ function requireBool(record: Record<string, unknown>, key: string): boolean {
   const value = record[key]
   if (typeof value !== 'boolean') throw new WireError(`missing or invalid "${key}"`)
   return value
+}
+
+/** Require a finite number (NaN / Infinity / strings are rejected). */
+function requireNumber(record: Record<string, unknown>, key: string): number {
+  const value = record[key]
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new WireError(`missing or invalid "${key}"`)
+  }
+  return value
+}
+
+/**
+ * Decode the SPEC F009 listing settings. Both fields are required in the
+ * payload (they always travel together) and validated defensively: the
+ * bridge drops a malformed settings message instead of letting a broken
+ * value reach a listing. Range clamping is the HOST's job (`resolveListingSettings`),
+ * so an out-of-range-but-finite number is accepted here.
+ */
+export function parseListingSettings(raw: unknown): ListingSettings {
+  if (!isRecord(raw)) throw new WireError('invalid settings payload')
+  return {
+    includeHiddenEntries: requireBool(raw, 'includeHiddenEntries'),
+    maxListedEntries: requireNumber(raw, 'maxListedEntries'),
+  }
 }
 
 /** Validate one command name + payload (the shape of {@link ControllerCommand}). */
@@ -101,9 +126,14 @@ export function parseClientMessage(text: string): ClientToHostMessage {
         openedFiles: stringArray(state.openedFiles, 'openedFiles'),
         expandedFolders: stringArray(state.expandedFolders, 'expandedFolders'),
         updatedAt: typeof state.updatedAt === 'number' && Number.isFinite(state.updatedAt) ? state.updatedAt : 0,
+        // SPEC F009: settings ride along when the client has them; a state
+        // push without them leaves the host's last known values untouched.
+        ...(Object.prototype.hasOwnProperty.call(state, 'settings') ? { settings: parseListingSettings(state.settings) } : {}),
       }
       return { type: 'state', state: wire }
     }
+    case 'settings':
+      return { type: 'settings', settings: parseListingSettings(parsed.settings) }
     case 'command-result': {
       const result = parsed.result
       if (!isRecord(result)) throw new WireError('invalid command-result payload')
@@ -150,6 +180,11 @@ export function encodeHostCommand(id: string, command: ControllerCommand): strin
 /** Encode one client→host state push. */
 export function encodeClientState(state: SidebarStateWire): string {
   return JSON.stringify({ type: 'state', state })
+}
+
+/** Encode one client→host listing-settings push (SPEC F009). */
+export function encodeClientSettings(settings: ListingSettings): string {
+  return JSON.stringify({ type: 'settings', settings })
 }
 
 /** Encode one client→host acknowledgment. */

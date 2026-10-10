@@ -82,7 +82,7 @@
 
 ## F009 侧边卡片设置（列举行为配置）
 
-- 实现状态：待实现（2026-10-10 规格增量，用户确认该版文档后开发）。
+- 实现状态：已实现（2026-10-10 按已确认的本版文档实现；包版本 0.2.0）。
 - 场景与预期：在「设置 → 侧边卡片」（第三方插件 `dsh-better-sidebar` 注册的 `settings.section` 页）里，本插件的卡片提供两个设置行，控制文件列举行为：`includeHiddenEntries`（开关，默认 `true`，是否返回点开头的隐藏项，返回时仍带 `hidden` 标记）与 `maxListedEntries`（数字，默认 `1000`，最小 `1`，单层列举行数上限，超出时结果标 `truncated`）。两项作用于 `list_files` 与 `refresh_tree` 共用的单层列举。该卡片现在是**空白标题**的行（描述符 `title: () => ''`，而该页的 tab 卡片不过滤 `hidden`、也不像 viewer 卡片那样回退 id），本规格要求给描述符正式标题（暂拟「文件树与列表」，待用户确认）。
 - 边界与异常：
   - 软依赖：`dsh-better-sidebar` 缺失，或版本低于 0.12.0（能力列表 `service.features` 不含 `pluginSettings`，老版本可能没有该字段）时，两项回退现有硬编码默认值（返回隐藏项、上限 1000），插件与其 11 个工具照常工作；只通过公开 service 快照读取（`getSnapshot().prefs.pluginSettings[<描述符 id>]`）与订阅（`subscribe`／`subscribeState`）跟踪变化，不访问私有 store。
@@ -97,16 +97,22 @@
   - 锚点卡片的启用开关是上游统一行为：关闭后上游 `openTab` 会拒绝（`console.warn`），锚点无法挂载、store 捕获失败，依赖 store 的显隐／展开类命令随之不可用。本规格不修改该上游行为，只如实记录。
   - 两项是 better-sidebar 的用户设置（全局），不按会话隔离；宿主镜像不因此新增每会话字段。
 - 验收条件：默认（未设置）行为与当前一致（列出隐藏项、上限 1000、`truncated` 语义不变）；关闭 `includeHiddenEntries` 后 `list_files`／`refresh_tree` 不再返回点开头条目，且非隐藏条目数不因隐藏项占位而减少；`maxListedEntries` 设为 3 时单层最多返回 3 行并标 `truncated`，设为 0／非法值时回落 1000 或按 `min` 夹取且不报错；卡片上能看到正式标题与两个设置行；未安装 better-sidebar 或版本不支持时宿主仍能列目录并保持默认行为；设置改动后在**下一次**工具调用生效，不需要重载插件。
-- 实现依据：待实现；预期改动 [../src/client/index.ts](../src/client/index.ts)（描述符标题、`pluginToggles` 两行、读回 prefs 并同步宿主）、[../src/host/tools.ts](../src/host/tools.ts)（`list_files`／`refresh_tree` 行为）、[../src/host/fs-tree.ts](../src/host/fs-tree.ts)（`maxEntries` 默认与隐藏项过滤）、[../src/shared/wire.ts](../src/shared/wire.ts)（新增可选字段承载客户端→宿主的同步，已确认需要）。
-- 验证记录：本版为文档增量，未运行任何验证。
+- 实现依据：已实现。描述符标题与两行设置：[../src/client/index.ts](../src/client/index.ts)（`ANCHOR_TITLE = '文件树与列表'`、`settings.pluginToggles` 两行，`min: 1`）；prefs 读回与同步：同文件 `settingsFromSnapshot`（只读公开 `service.getSnapshot().prefs.pluginSettings[...]`）与 `pushSettings`；协议：[../src/shared/wire.ts](../src/shared/wire.ts)（`settings` 消息 + `state.settings` 可选字段，`parseListingSettings` 防御校验）、[../src/shared/types.ts](../src/shared/types.ts)（`ListingSettings` / `LISTING_SETTINGS_DEFAULTS` / `MAX_LISTED_ENTRIES_MIN`）；宿主镜像与回落：[../src/host/listing-settings.ts](../src/host/listing-settings.ts)（`ListingSettingsStore` / `resolveListingSettings`）；桥接收：[../src/host/bridge-server.ts](../src/host/bridge-server.ts)；宿主列举开关：[../src/host/fs-tree.ts](../src/host/fs-tree.ts)（`ListDirectoryOptions`，先过滤再截断）、[../src/host/tools.ts](../src/host/tools.ts)（`list_files` / `refresh_tree` 共用 `getListingOptions`）、[../src/index.ts](../src/index.ts)（装配）。
+- 验证记录：2026-10-10 实现并运行验证。`npm run typecheck`（`tsc -p tsconfig.json --noEmit`）通过、无输出；`npm test`（vitest 4.1.11）**13 个测试文件 / 171 个用例全部通过**（本次由 137 增至 171，新增 34 个：`tests/host/listing-settings.spec.ts` 11、`tests/host/fs-tree.spec.ts` +5、`tests/shared/wire.spec.ts` +4、`tests/host/bridge.spec.ts` +3、`tests/host/tools.spec.ts` +6、`tests/client-bundle.spec.ts` +5）；`npm run build`（clean + tsc + tsdown）成功，`lib/client.js` 25.26 kB，`lib/` 已重建并留在工作区。覆盖点：过滤与截断顺序（隐藏项不吃配额、只剩被过滤项时不标 `truncated`）、上限与非法值回落（非有限值回落 1000、越界按 `min` 夹取、分数取整）、`hidden` 标记保留、无客户端（无设置镜像）时按默认值列举、wire 新字段的编解码与畸形输入拒绝（缺字段／类型错误／非有限数字）、设置按会话隔离、改设置后**下一次**工具调用生效、锚点既有回归（`tests/client-bundle.spec.ts` 两种落点）保持通过。
+  实现中确认并修正的一处自身缺陷：客户端 `pushSettings` 原先在 `send` 之前推进去重键，而 `send` 在 socket 仍为 CONNECTING 时是 no-op，导致 `onopen` 的补推被去重键吞掉（刷新页面后宿主持有陈旧默认值）。现改为 `send` 返回是否真正发出、仅在发出后推进去重键；新增 `tests/client-bundle.spec.ts` 用例模拟 socket 打开并断言 settings 消息确实发出（修正前该用例失败，为 0 条 settings 消息）。
+  未执行：真实浏览器 GUI 核对（设置页看到「文件树与列表」标题与两行、改值后生效、刷新后仍生效）尚未执行；未安装 better-sidebar 的降级路径为单元/构建产物级覆盖，未在真实缺插件环境核对；`docs/architecture.md` 记录的锚点启用开关关闭后 store 捕获失败这一上游边界未做真实页面复核。
+  取值口径（本版验收条件允许两者：「回落 1000 或按 `min` 夹取」）：`maxListedEntries` 为非有限值／非数字时回落默认 1000；为有限但小于 `min`（含 0／负数）时**按 `min` 夹取为 1**，与上游数字行按 `min` 夹取一致。
 
 ## 差异与验证待办
 
 - 新补 AGENTS.md，保留实际 master 分支；lib/ 在本仓库是已跟踪产物，文档任务不运行构建去改写它。
 - 原生 sidebar store 与隐藏锚点已新增构建产物级回归用例（两种落点）；真实浏览器 GUI 回归仍待执行。
-- 2026-10-10 增量待办：F009 尚无实现与验证。已定事项：①锚点卡片的正式名称按暂拟「文件树与列表」定稿（实现前仍可改）；②客户端→宿主的同步走 [../src/shared/wire.ts](../src/shared/wire.ts) 新增可选字段（用户已确认，不改为宿主直接读 better-sidebar 命名空间）；③锚点卡片启用开关关闭会让 store 捕获失败（上游拒绝 `openTab`）这一上游边界只在本文档与 architecture.md 如实记录，不额外写进开发 Skill，也不修改上游行为。
+- 2026-10-10 增量待办：F009 已实现并完成上述验证（实现与验证记录见 F009）；真实浏览器 GUI 核对仍待执行。已定事项：①锚点卡片的正式名称按暂拟「文件树与列表」定稿并已落地为描述符标题；②客户端→宿主的同步走 [../src/shared/wire.ts](../src/shared/wire.ts) 新增 `settings` 消息与 `state.settings` 可选字段（已实现，不改为宿主直接读 better-sidebar 命名空间）；③锚点卡片启用开关关闭会让 store 捕获失败（上游拒绝 `openTab`）这一上游边界只在本文档与 architecture.md 如实记录，不额外写进开发 Skill，也不修改上游行为。
+- 2026-10-10 实现中记录的新观察（F009 范围外，未修改）：客户端 `pushState` 的「语义变化才推送」去重键在 socket 仍为 CONNECTING 时也会推进，而 `send` 此时是 no-op，导致 `onopen` 里为补齐而调用的 `pushState()` 被去重键拦掉——用构建产物探针实测，socket 打开后只发出 `hello` 与 `settings`，没有 `state`。这会让 F002「有客户端时读取状态先请求同步」与决策 D5「sync_state 保证回答不陈旧」在页面刚加载、尚无用户交互时失效（宿主镜像为空，`get_sidebar_state` 报 `SIDEBAR_UNAVAILABLE`），直到发生一次真实语义变化。本次按 F009 边界**未改动**该既有推送路径（避免改动 F002/F005 行为），与本次新加的 settings 推送采用了「仅在真正发出后推进去重键」的写法；是否一并修正 `pushState` 待用户拍板。
+- 2026-10-10 上游显示与有效值的差异（未修改上游）：`pluginToggles` 的 `switch` 行读取原始键值并以 `read(key) === true` 判定勾选，未设置的键显示为「关闭」，而本规格的有效默认是「返回隐藏项（开）」。即卡片在用户未设置时显示关闭、实际行为为开启；该上游机制没有「默认值」概念，本插件未写入 prefs 伪造默认值。真实页面核对时可一并确认该显示是否符合预期。
 
 ## 规格变更记录
 
 - 2026-10-03：首次从现行文档、实现和现有测试建立功能基线；仅修改维护文档，未变更 API、存储或运行逻辑。
 - 2026-10-10：新增 F009 侧边卡片设置（列举行为配置：`includeHiddenEntries`／`maxListedEntries`，以及锚点描述符的正式标题）；配置契约同步到 [architecture.md](architecture.md) 的「配置契约」，`list_files` 说明同步到 [tools.md](tools.md)。本版为待用户确认的文档增量，未改动源码、测试或运行配置、未重创 `lib/`。
+- 2026-10-10：按已确认的 F009 文档实现（包版本 0.2.0）：描述符标题「文件树与列表」、`settings.pluginToggles` 两行、prefs 读回经 `wire.ts` 新 `settings` 消息同步宿主、宿主按会话镜像两项设置并在 `list_files`／`refresh_tree` 共用的单层列举中先过滤再截断；配置契约在 [architecture.md](architecture.md) 补充实现位置，`refresh_tree` 说明同步到 [tools.md](tools.md)，`lib/` 已重建。验证结果与未执行项见 F009 的验证记录；规格预期与验收条件未变。

@@ -57,6 +57,32 @@ export interface ControllerState {
   updatedAt: number
 }
 
+/**
+ * The two single-level listing settings of SPEC F009 (侧边卡片设置).
+ *
+ * They are better-sidebar USER settings (global, stored in its own prefs
+ * document under `pluginSettings['dsh-better-sidebar-controller:anchor']`),
+ * but the listing itself runs on the host half — so the client half reads
+ * them through the public service snapshot and mirrors them over the bridge.
+ * Every transport field is OPTIONAL on the wire (an old client simply omits
+ * them) and the host falls back to {@link LISTING_SETTINGS_DEFAULTS}.
+ */
+export interface ListingSettings {
+  /** Whether dot-prefixed (hidden) entries are returned; they keep `hidden: true`. */
+  includeHiddenEntries: boolean
+  /** Row bound of one directory level; exceeding it flags `truncated`. */
+  maxListedEntries: number
+}
+
+/** Fallback listing settings: current behavior (hidden rows on, bound 1000). */
+export const LISTING_SETTINGS_DEFAULTS: ListingSettings = {
+  includeHiddenEntries: true,
+  maxListedEntries: 1000,
+}
+
+/** Lower bound of `maxListedEntries` (mirrors the settings row's `min: 1`). */
+export const MAX_LISTED_ENTRIES_MIN = 1
+
 /** State pushed by the client (no host bookkeeping, unlike {@link ControllerState}). */
 export interface SidebarStateWire {
   sessionId: string
@@ -68,6 +94,8 @@ export interface SidebarStateWire {
   openedFiles: string[]
   expandedFolders: string[]
   updatedAt: number
+  /** SPEC F009 listing settings; absent when the client declares none. */
+  settings?: ListingSettings
 }
 
 /**
@@ -119,6 +147,8 @@ export interface CommandAck {
 export type ClientToHostMessage =
   | { type: 'hello'; sessionId: string }
   | { type: 'state'; state: SidebarStateWire }
+  /** One settings-only push (SPEC F009): both fields always travel together. */
+  | { type: 'settings'; settings: ListingSettings }
   | { type: 'command-result'; result: CommandAck }
 
 /** Host → client wire messages. */

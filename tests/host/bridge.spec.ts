@@ -168,4 +168,40 @@ describe('BridgeServer', () => {
     expect(outcome.delivered).toBe(true)
     expect(JSON.parse(a.sent[0]!).command).toEqual({ name: 'sync_state' })
   })
+
+  it('mirrors the listing settings pushed by a client (SPEC F009)', () => {
+    const { bridge } = makeBridge()
+    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
+    bridge.handleClientMessage(SID, {
+      type: 'settings',
+      settings: { includeHiddenEntries: false, maxListedEntries: 4 },
+    })
+    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: false, maxListedEntries: 4 })
+    // A later push replaces the previous values.
+    bridge.handleClientMessage(SID, {
+      type: 'settings',
+      settings: { includeHiddenEntries: true, maxListedEntries: 8 },
+    })
+    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: true, maxListedEntries: 8 })
+  })
+
+  it('keeps the defaults when no client ever pushed settings, and drops them on dispose', () => {
+    const { bridge } = makeBridge()
+    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
+    bridge.handleClientMessage(SID, {
+      type: 'settings',
+      settings: { includeHiddenEntries: false, maxListedEntries: 2 },
+    })
+    bridge.dispose()
+    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
+  })
+
+  it('keeps settings per session (a second session is unaffected)', () => {
+    const { bridge } = makeBridge()
+    bridge.handleClientMessage(SID, {
+      type: 'settings',
+      settings: { includeHiddenEntries: false, maxListedEntries: 2 },
+    })
+    expect(bridge.listingSettings.get('s-2')).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
+  })
 })

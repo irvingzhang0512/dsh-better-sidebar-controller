@@ -86,6 +86,51 @@ describe('listDirectorySafe', () => {
     expect(result.listing.entries.length).toBe(2)
     expect(result.listing.truncated).toBe(true)
   })
+  it('filters hidden entries when includeHiddenEntries is false, keeping the hidden flag on the rest', async () => {
+    await seed(['.env', '.git/', 'visible.md'])
+    const result = await listDirectorySafe(root, { includeHiddenEntries: false })
+    if (!result.ok) return
+    const names = result.listing.entries.map(e => e.name)
+    expect(names).not.toContain('.env')
+    expect(names).not.toContain('.git')
+    expect(names).toEqual(['visible.md'])
+    expect(result.listing.entries.every(e => e.hidden === false)).toBe(true)
+  })
+  it('still flags hidden entries when they ARE returned', async () => {
+    await seed(['.env', 'visible.md'])
+    const result = await listDirectorySafe(root, { includeHiddenEntries: true })
+    if (!result.ok) return
+    expect(result.listing.entries.find(e => e.name === '.env')?.hidden).toBe(true)
+  })
+  it('filters BEFORE truncating: hidden rows never eat the visible quota', async () => {
+    // 3 hidden + 3 visible, bound 2: filtering first means BOTH returned rows
+    // are visible (the old order would have spent quota on the hidden rows),
+    // and the third visible row makes truncated true. Which two visible rows
+    // survive depends on readdir order (the bound applies while streaming,
+    // before the sort), so only the count / flags are asserted.
+    await seed(['.a', '.b', '.c', 'v1.md', 'v2.md', 'v3.md'])
+    const result = await listDirectorySafe(root, { includeHiddenEntries: false, maxListedEntries: 2 })
+    if (!result.ok) return
+    expect(result.listing.entries).toHaveLength(2)
+    expect(result.listing.entries.map(e => e.name).every(name => !name.startsWith('.'))).toBe(true)
+    expect(result.listing.truncated).toBe(true)
+  })
+  it('does not flag truncation when only filtered-out hidden rows remain', async () => {
+    // 3 hidden + 2 visible, bound 5: nothing eligible is left over, so the
+    // listing is complete even though the directory has 5 rows.
+    await seed(['.a', '.b', '.c', 'v1.md', 'v2.md'])
+    const result = await listDirectorySafe(root, { includeHiddenEntries: false, maxListedEntries: 5 })
+    if (!result.ok) return
+    expect(result.listing.entries.map(e => e.name)).toEqual(['v1.md', 'v2.md'])
+    expect(result.listing.truncated).toBe(false)
+  })
+  it('truncates on the visible count when the bound is exceeded without hidden rows', async () => {
+    await seed(['.a', 'v1.md', 'v2.md', 'v3.md'])
+    const result = await listDirectorySafe(root, { includeHiddenEntries: false, maxListedEntries: 2 })
+    if (!result.ok) return
+    expect(result.listing.entries).toHaveLength(2)
+    expect(result.listing.truncated).toBe(true)
+  })
   it('returns NOT_A_DIRECTORY for a file or a missing path', async () => {
     await writeFile(join(root, 'f.md'), 'x')
     const fileResult = await listDirectorySafe(join(root, 'f.md'))

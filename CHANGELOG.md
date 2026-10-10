@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.2.0 (2026-10-10)
+
+### 新增
+
+- **侧边卡片设置：列举行为配置（SPEC F009）**。better-sidebar 的「设置 → 侧边卡片」页为每个
+  已注册 tab 描述符渲染一张卡片，本插件的隐藏锚点描述符因此也是本插件的设置卡片；本次给它：
+  - 正式标题「**文件树与列表**」（此前 `title: () => ''` 是空白标题）。锚点的 `hidden` / `single`
+    与生命周期（后台建标签不抢活动标签、捕获 store 后清理、会话切换、文件标签恢复）均未改动，
+    仍不进「+」新建菜单。
+  - 两行 `settings.pluginToggles`（better-sidebar v0.12.0+ 的插件自有设置，键为插件本地键，
+    持久化在其 prefs 的 `pluginSettings['dsh-better-sidebar-controller:anchor']`）：
+    `includeHiddenEntries`（开关，默认 `true`，是否返回点开头的隐藏项，返回时仍带 `hidden` 标记）
+    与 `maxListedEntries`（数字，`min: 1`，默认 `1000`，单层列举行数上限）。
+  - 两项作用于 `list_files` 与 `refresh_tree` **共用**的单层列举，顺序固定为**先按
+    `includeHiddenEntries` 过滤、再按 `maxListedEntries` 截断**，因此被过滤掉的隐藏项不会占用
+    可见行的配额；`truncated` 表示仍有符合过滤条件的行未返回。既有返回形状（目录优先排序、
+    `hidden`／`broken`／`truncated` 标记）不变。
+  - 浏览器半边只用**公开** service 快照读回设置（`getSnapshot().prefs.pluginSettings[...]` +
+    `subscribeState` 跟踪变化，不碰私有 store），经桥接把两项同步给宿主；宿主按会话镜像，
+    `list_files` / `refresh_tree` 在下一次调用时使用新值（无需重载插件）。无客户端连接、
+    better-sidebar 缺失或版本过旧（无 `pluginSettings`）时一律按默认值列举，不失败。
+  - 取值防御：`maxListedEntries` 非数字／非有限值回落默认 `1000`，有限但小于 `min`（含 0、负数）
+    按 `min` 夹取为 `1`；开关值非 `true` 视为关闭；未设置的键使用上述默认值。
+  - 同步的去重键只在消息**真正发出**后推进：此前写法会在 socket 仍为 CONNECTING（`send` 为
+    no-op）时就把值标记为已同步，`onopen` 的补推会被吞掉，刷新页面后宿主会停留在陈旧默认值。
+
+### 测试
+
+- 新增 `tests/host/listing-settings.spec.ts`（11 例）：默认值、未设置／非 `true` / 非有限值／
+  越界与分数上限的归一、按会话隔离与清理。
+- `tests/host/fs-tree.spec.ts` +5 例：`includeHiddenEntries=false` 的过滤、过滤后仍保留
+  `hidden` 标记、**先过滤再截断**（隐藏项不吃配额；只剩被过滤项时不标 `truncated`）。
+- `tests/shared/wire.spec.ts` +4 例：`settings` 消息与 `state.settings` 可选字段的编解码、
+  畸形输入（缺字段／类型错误／非有限数字）拒绝、越界但有限的上限留给宿主夹取。
+- `tests/host/bridge.spec.ts` +3 例：`settings` 消息写入每会话镜像、无推送时保持默认、
+  `dispose` 清空、跨会话隔离。
+- `tests/host/tools.spec.ts` +6 例：`list_files` / `refresh_tree` 按设置列举（含无客户端默认行为、
+  按会话隔离、改设置后下一次调用生效）。
+- `tests/client-bundle.spec.ts` +5 例并在原有用例中补断言：描述符标题与两行 `pluginToggles`、
+  锚点仍不进「+」菜单、模拟 socket 打开后 settings 消息确实发出（修正前失败）、读回 prefs 的
+  正常值与畸形值、设置未变不重复推送且变化后推送新值。
+- 本次实现由 137 例增至 **171 例**；`npm run typecheck`、`npm test`、`npm run build` 三绿，
+  `lib/` 已重建。真实浏览器 GUI 核对未执行（见 [docs/SPEC.md](docs/SPEC.md) F009 的验证记录）。
+
 ## 0.1.1 (2026-10-10)
 
 ### 修复

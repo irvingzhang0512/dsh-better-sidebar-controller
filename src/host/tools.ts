@@ -23,10 +23,11 @@ import type {
   ControllerCommand,
   ControllerState,
   DispatchOutcome,
+  ListingSettings,
 } from '../shared/types.ts'
 import type { BridgeServer } from './bridge-server.ts'
 import type { ControllerStateStore } from './controller-state.ts'
-import type { ListDirectoryResult } from './fs-tree.ts'
+import type { ListDirectoryOptions, ListDirectoryResult } from './fs-tree.ts'
 import type { PathKindResult, PathResolveResult } from './paths.ts'
 
 /** Every tool name (kept in sync for SKILL/docs contract tests). */
@@ -60,7 +61,12 @@ export interface ControllerDeps {
   resolveTarget(cwd: string, raw: string): Promise<PathResolveResult>
   resolveLexical(cwd: string, raw: string): PathResolveResult
   pathKind(path: string): Promise<PathKindResult>
-  listDirectory(path: string, maxEntries?: number): Promise<ListDirectoryResult>
+  listDirectory(path: string, options?: ListDirectoryOptions): Promise<ListDirectoryResult>
+  /**
+   * Effective side-card listing settings for one session (SPEC F009).
+   * Optional so a host without the settings mirror keeps the defaults.
+   */
+  listingSettings?(sessionId: string): ListingSettings
   /** How long a dispatched command waits for the client ack. */
   ackTimeoutMs?: number
 }
@@ -273,6 +279,21 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
     return { cwd }
   }
 
+  /**
+   * Effective listing options for one session (SPEC F009). Read once per tool
+   * call so a settings change takes effect on the NEXT call; a host without
+   * the settings mirror (or a session that never pushed any) omits them and
+   * `fs-tree.ts` applies its own defaults.
+   */
+  const getListingOptions = (sessionId: string): ListDirectoryOptions | undefined => {
+    const settings = deps.listingSettings?.(sessionId)
+    if (settings === undefined) return undefined
+    return {
+      includeHiddenEntries: settings.includeHiddenEntries,
+      maxListedEntries: settings.maxListedEntries,
+    }
+  }
+
   // ── 1. get_sidebar_state ──────────────────────────────────────────────
   disposers.push(ctx.tools.register(defineTool({
     name: 'get_sidebar_state',
@@ -349,7 +370,8 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
     name: 'list_files',
     description:
       '列出目录内容（单层）。path 省略时列出工作区根目录。适合「看看有哪些文件」「列一下 docs 目录」。'
-      + '返回目录优先排序的条目列表（目录在前，隐藏文件带 hidden 标记）。',
+      + '返回目录优先排序的条目列表（目录在前，隐藏文件带 hidden 标记）。'
+      + '返回范围与上限受侧边卡片设置 includeHiddenEntries／maxListedEntries 控制。',
     parameters: {
       path: {
         type: 'string',
@@ -373,7 +395,7 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
       const raw = typeof args.path === 'string' && args.path !== '' ? args.path : '.'
       const resolved = await deps.resolveTarget(cwdResult.cwd, raw)
       if (!resolved.ok) return resolved
-      const listing = await deps.listDirectory(resolved.path)
+      const listing = await deps.listDirectory(resolved.path, getListingOptions(session.sessionId))
       if (!listing.ok) return listing
       return {
         ...success('OK', `已列出 ${listing.listing.entries.length} 个条目。`),
@@ -451,7 +473,8 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
     name: 'refresh_tree',
     description:
       '刷新文件树：重新读取工作区根目录并让 Sidebar 重新加载已展开的目录。'
-      + '适合「刷新文件树」「重新看看文件」等场景（例如外部新建了文件）。',
+      + '适合「刷新文件树」「重新看看文件」等场景（例如外部新建了文件）。'
+      + '返回的根目录条目同样受侧边卡片设置 includeHiddenEntries／maxListedEntries 控制。',
     parameters: {},
     output: {
       schema: outputWith({
@@ -469,7 +492,7 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
       if ('error' in session) return session.error
       const cwdResult = await getCwdOrError(session.sessionId)
       if ('error' in cwdResult) return cwdResult.error
-      const listing = await deps.listDirectory(cwdResult.cwd)
+      const listing = await deps.listDirectory(cwdResult.cwd, getListingOptions(session.sessionId))
       if (!listing.ok) return listing
       const outcome = await deps.bridge.dispatch(session.sessionId, { name: 'refresh_tree' }, deps.ackTimeoutMs)
       return {

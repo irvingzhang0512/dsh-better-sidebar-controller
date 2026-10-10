@@ -19,6 +19,10 @@
  *    non-invasive way to mutate `state.expanded` (expand/collapse) and panel
  *    visibility without modifying better-sidebar's core. The anchor renders
  *    nothing and is removed as soon as the store has been captured.
+ * 4. Settings mirror — the same anchor descriptor carries this plugin's
+ *    side-card listing settings (SPEC F009); the client reads them from the
+ *    public service snapshot and pushes them to the host, where the actual
+ *    directory listing runs.
  */
 import type { Context } from 'dsh-better-sidebar';
 export declare const inject: string[];

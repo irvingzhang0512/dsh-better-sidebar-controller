@@ -12,6 +12,7 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { registerControllerTools, type ControllerDeps } from '../../src/host/tools.ts'
 import { ControllerStateStore } from '../../src/host/controller-state.ts'
 import { listDirectorySafe } from '../../src/host/fs-tree.ts'
+import { ListingSettingsStore } from '../../src/host/listing-settings.ts'
 import { pathKind, resolveLexicalTarget, resolveWorkspaceTarget } from '../../src/host/paths.ts'
 import type { CommandAck, ControllerCommand, DispatchOutcome } from '../../src/shared/types.ts'
 
@@ -43,6 +44,7 @@ class FakeBridge {
 
 function makeHarness(bridge = new FakeBridge(), cwd: string | null = root) {
   const store = new ControllerStateStore()
+  const listingSettings = new ListingSettingsStore()
   const tools = new Map<string, RegisteredTool>()
   const deps: ControllerDeps = {
     getCwd: async () => cwd,
@@ -52,6 +54,7 @@ function makeHarness(bridge = new FakeBridge(), cwd: string | null = root) {
     resolveLexical: resolveLexicalTarget,
     pathKind,
     listDirectory: listDirectorySafe,
+    listingSettings: (sessionId: string) => listingSettings.get(sessionId),
   }
   registerControllerTools(
     { tools: { register: (tool) => { const t = tool as RegisteredTool; tools.set(t.name, t); return () => {} } } },
@@ -67,7 +70,7 @@ function makeHarness(bridge = new FakeBridge(), cwd: string | null = root) {
     const result = await tool.execute(args, exec)
     return result as Record<string, unknown>
   }
-  return { store, tools, run, bridge }
+  return { store, tools, run, bridge, listingSettings }
 }
 
 let root: string
@@ -214,6 +217,50 @@ describe('list_files', () => {
     const result = await run('list_files', { path: '..' })
     expect(result).toMatchObject({ ok: false, code: 'PATH_OUTSIDE_WORKSPACE' })
   })
+  it('lists hidden entries by default when no client ever pushed settings', async () => {
+    await writeFile(join(root, '.env'), 'x')
+    const { run } = makeHarness()
+    const result = await run('list_files')
+    const entries = result.entries as Array<Record<string, unknown>>
+    const hidden = entries.find(e => e.name === '.env')
+    expect(hidden).toMatchObject({ hidden: true })
+    expect(result.truncated).toBe(false)
+  })
+  it('honors includeHiddenEntries=false (SPEC F009)', async () => {
+    await writeFile(join(root, '.env'), 'x')
+    const harness = makeHarness()
+    harness.listingSettings.apply(SID, { includeHiddenEntries: false, maxListedEntries: 1000 })
+    const result = await harness.run('list_files')
+    const entries = result.entries as Array<Record<string, unknown>>
+    expect(entries.map(e => e.name)).not.toContain('.env')
+    expect(entries.map(e => e.name)).toEqual(expect.arrayContaining(['a.md', 'docs']))
+  })
+  it('honors maxListedEntries and flags truncated', async () => {
+    const harness = makeHarness()
+    harness.listingSettings.apply(SID, { includeHiddenEntries: true, maxListedEntries: 1 })
+    const result = await harness.run('list_files')
+    const entries = result.entries as Array<Record<string, unknown>>
+    expect(entries).toHaveLength(1)
+    expect(result.truncated).toBe(true)
+  })
+  it('applies settings per session', async () => {
+    await writeFile(join(root, '.env'), 'x')
+    const harness = makeHarness()
+    harness.listingSettings.apply('other-session', { includeHiddenEntries: false, maxListedEntries: 1 })
+    const result = await harness.run('list_files')
+    const entries = result.entries as Array<Record<string, unknown>>
+    expect(entries.map(e => e.name)).toContain('.env')
+    expect(result.truncated).toBe(false)
+  })
+  it('takes effect on the NEXT call after a settings change', async () => {
+    await writeFile(join(root, '.env'), 'x')
+    const harness = makeHarness()
+    const before = await harness.run('list_files')
+    expect((before.entries as Array<Record<string, unknown>>).map(e => e.name)).toContain('.env')
+    harness.listingSettings.apply(SID, { includeHiddenEntries: false, maxListedEntries: 1000 })
+    const after = await harness.run('list_files')
+    expect((after.entries as Array<Record<string, unknown>>).map(e => e.name)).not.toContain('.env')
+  })
 })
 
 describe('expand_folder / collapse_folder', () => {
@@ -252,6 +299,20 @@ describe('refresh_tree', () => {
     expect(bridge.sent.at(-1)?.command).toEqual({ name: 'refresh_tree' })
     const entries = result.entries as Array<Record<string, unknown>>
     expect(entries.map(e => e.name)).toEqual(expect.arrayContaining(['a.md', 'docs']))
+  })
+  it('applies the same listing settings as list_files (SPEC F009)', async () => {
+    await writeFile(join(root, '.env'), 'x')
+    const bridge = new FakeBridge()
+    bridge.attached.set(SID, 1)
+    const harness = makeHarness(bridge)
+    harness.listingSettings.apply(SID, { includeHiddenEntries: false, maxListedEntries: 1 })
+    const result = await harness.run('refresh_tree')
+    const entries = result.entries as Array<Record<string, unknown>>
+    expect(entries).toHaveLength(1)
+    expect(entries.map(e => e.name)).not.toContain('.env')
+    expect(result.truncated).toBe(true)
+    // The client refresh is still dispatched even though the host listing is bounded.
+    expect(bridge.sent.at(-1)?.command).toEqual({ name: 'refresh_tree' })
   })
 })
 

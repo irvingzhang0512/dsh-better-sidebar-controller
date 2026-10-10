@@ -1,5 +1,6 @@
 import type { ClientToHostMessage, ControllerCommand, DispatchOutcome } from '../shared/types.ts';
 import { ControllerStateStore } from './controller-state.ts';
+import { ListingSettingsStore } from './listing-settings.ts';
 /** How long a dispatched command waits for the client's ack by default. */
 export declare const BRIDGE_ACK_TIMEOUT_MS = 4000;
 /** A minimal message sender (a WebSocket in production, a stub in tests). */
@@ -7,6 +8,12 @@ export type Sender = (message: string) => void;
 export interface BridgeOptions {
     /** The state mirror the client pushes into. */
     store: ControllerStateStore;
+    /**
+     * The per-session side-card listing-settings mirror (SPEC F009). Optional:
+     * the bridge owns one when not supplied, so a host that only reads the
+     * defaults still works.
+     */
+    listingSettings?: ListingSettingsStore;
     /** Resolve a session's workspace root (its cwd). */
     resolveWorkspaceRoot: (sessionId: string) => Promise<string | null>;
     /** Optional clock injection for tests. */
@@ -15,6 +22,7 @@ export interface BridgeOptions {
 export declare class BridgeServer {
     private options;
     readonly store: ControllerStateStore;
+    readonly listingSettings: ListingSettingsStore;
     private sockets;
     private queues;
     private pending;

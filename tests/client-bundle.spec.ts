@@ -32,10 +32,15 @@ interface Probe {
   opened: Array<Record<string, unknown>>
   closed: string[]
   activated: string[]
+  sockets: WebSocketStub[]
+  /** 假 store 的订阅者（subscribeState），用来模拟"快照变化"。 */
+  listeners: Array<() => void>
+  /** 可变快照持有者：改 prefs 后调用 listeners 即可模拟设置变更。 */
+  current: { value: ReturnType<typeof snapshot> }
 }
 
 /** 按指定落点策略构造一套最小假 ctx + DOM/浏览器桩，并执行 bundle。 */
-function loadBundle(options: { nativeLanding: boolean }): Probe {
+function loadBundle(options: { nativeLanding: boolean; prefs?: unknown }): Probe {
   const captured: CapturedModule[] = []
   const tabs: Array<Record<string, unknown>> = []
   const opened: Array<Record<string, unknown>> = []
@@ -43,7 +48,7 @@ function loadBundle(options: { nativeLanding: boolean }): Probe {
   const activated: string[] = []
   const listeners: Array<() => void> = []
   const anchorTab = { id: ANCHOR_TAB_ID, type: 'dsh-better-sidebar-controller:anchor', title: '' }
-  const current = { value: snapshot('s1', makeState()) }
+  const current = { value: snapshot('s1', makeState(), options.prefs) }
 
   const service = {
     registerTab: (descriptor: Record<string, unknown>) => {
@@ -90,6 +95,7 @@ function loadBundle(options: { nativeLanding: boolean }): Probe {
     clearInterval: () => undefined,
   }
   const socketCalls: string[] = []
+  const sockets: WebSocketStub[] = []
   class WebSocketStub {
     static readonly OPEN = 1
     readyState = 0
@@ -97,8 +103,12 @@ function loadBundle(options: { nativeLanding: boolean }): Probe {
     onmessage: unknown
     onclose: unknown
     onerror: unknown
-    constructor(readonly url: string) { socketCalls.push(url) }
-    send(): void { /* never open in this probe */ }
+    readonly sent: string[] = []
+    constructor(readonly url: string) {
+      socketCalls.push(url)
+      sockets.push(this)
+    }
+    send(message: string): void { this.sent.push(message) }
     close(): void { /* no-op */ }
   }
 
@@ -122,7 +132,20 @@ function loadBundle(options: { nativeLanding: boolean }): Probe {
   const exports = module.factory((id) => (context as unknown as { require: (id: string) => unknown }).require(id))
   ;(exports.apply as (ctx: Context) => void)(fakeCtx as unknown as Context)
 
-  return { module, context, tabs, opened, closed, activated }
+  return { module, context, tabs, opened, closed, activated, sockets, listeners, current }
+}
+
+/** 模拟浏览器侧 WebSocket 握手完成：置为 OPEN 并触发 onopen。 */
+function openSocket(probe: Probe, index = 0): WebSocketStub {
+  const ws = probe.sockets[index]!
+  ws.readyState = 1
+  ;(ws.onopen as () => void)()
+  return ws
+}
+
+/** 解析该 socket 收到的全部消息。 */
+function messagesOf(ws: WebSocketStub): Array<Record<string, unknown>> {
+  return ws.sent.map(text => JSON.parse(text) as Record<string, unknown>)
 }
 
 /** 让锚点组件挂载（真实环境由侧边栏渲染该隐藏页），随后清空微任务队列。 */
@@ -139,13 +162,27 @@ async function mountAnchor(probe: Probe): Promise<void> {
 }
 
 describe.skipIf(!existsSync(BUNDLE_PATH))('lib/client.js 构建产物冒烟与锚点清理', () => {
-  it('以包名注册、apply 挂载并注册隐藏锚点标签', () => {
+  it('以包名注册、apply 挂载并注册隐藏锚点标签（含 F009 标题与设置行）', () => {
     const probe = loadBundle({ nativeLanding: true })
     expect(probe.module.id).toBe(BUNDLE_ID)
     expect(probe.tabs).toHaveLength(1)
     expect(probe.tabs[0]!.id).toBe('dsh-better-sidebar-controller:anchor')
     expect(probe.tabs[0]!.hidden).toBe(true)
-    expect((probe.tabs[0]!.title as () => string)()).toBe('')
+    expect(probe.tabs[0]!.single).toBe(true)
+    // SPEC F009：锚点卡片有正式标题（可见修正只有标题）。
+    expect((probe.tabs[0]!.title as () => string)()).toBe('文件树与列表')
+    // SPEC F009：两行 pluginToggles（switch + number，min 1），键为插件本地键。
+    const settings = probe.tabs[0]!.settings as {
+      pluginToggles: Array<Record<string, unknown>>
+    }
+    expect(settings.pluginToggles).toHaveLength(2)
+    expect(settings.pluginToggles[0]).toMatchObject({ key: 'includeHiddenEntries', type: 'switch' })
+    expect(settings.pluginToggles[1]).toMatchObject({ key: 'maxListedEntries', type: 'number', min: 1 })
+  })
+
+  it('锚点仍不进「+」菜单：hidden 保持 true，且没有任何非隐藏描述符', () => {
+    const probe = loadBundle({ nativeLanding: true })
+    expect(probe.tabs.filter(tab => tab.hidden !== true)).toHaveLength(0)
   })
 
   it('原生落点（锚点不在 bottomSplits）：仍然关掉锚点，不残留空白页', async () => {
@@ -166,5 +203,68 @@ describe.skipIf(!existsSync(BUNDLE_PATH))('lib/client.js 构建产物冒烟与�
     expect(probe.closed).toContain(ANCHOR_TAB_ID)
     // 锚点抢占前的活动标签被恢复。
     expect(probe.activated).toContain('t-home')
+  })
+
+  it('SPEC F009：socket 打开后把两项设置推送给宿主（未设置时为默认值）', () => {
+    const probe = loadBundle({ nativeLanding: true })
+    const ws = openSocket(probe)
+    const settings = messagesOf(ws).filter(message => message.type === 'settings')
+    expect(settings).toHaveLength(1)
+    expect(settings[0]!.settings).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
+  })
+
+  it('SPEC F009：读回 better-sidebar prefs 的 pluginSettings 并同步给宿主', () => {
+    const probe = loadBundle({
+      nativeLanding: true,
+      prefs: {
+        pluginSettings: {
+          [ANCHOR_TAB_ID]: { includeHiddenEntries: false, maxListedEntries: 3 },
+        },
+      },
+    })
+    const ws = openSocket(probe)
+    const settings = messagesOf(ws).filter(message => message.type === 'settings')
+    expect(settings).toHaveLength(1)
+    expect(settings[0]!.settings).toEqual({ includeHiddenEntries: false, maxListedEntries: 3 })
+  })
+
+  it('SPEC F009：prefs 缺失或畸形时回落到默认值，不抛错', () => {
+    const noPrefs = loadBundle({ nativeLanding: true, prefs: undefined })
+    const wsNoPrefs = openSocket(noPrefs)
+    const a = messagesOf(wsNoPrefs).filter(message => message.type === 'settings')
+    expect(a[0]!.settings).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
+
+    const badPrefs = loadBundle({
+      nativeLanding: true,
+      prefs: { pluginSettings: { [ANCHOR_TAB_ID]: { includeHiddenEntries: 'yes', maxListedEntries: 0 } } },
+    })
+    const wsBad = openSocket(badPrefs)
+    const b = messagesOf(wsBad).filter(message => message.type === 'settings')
+    // 非法布尔按关闭；越界数字由宿主夹取，这里按 min 归一后送出。
+    expect(b[0]!.settings).toEqual({ includeHiddenEntries: false, maxListedEntries: 1 })
+  })
+
+  it('SPEC F009：设置未变化时不重复推送，变化后再推送新值', () => {
+    const anchorBlob = { includeHiddenEntries: true, maxListedEntries: 5 }
+    const probe = loadBundle({
+      nativeLanding: true,
+      prefs: { pluginSettings: { [ANCHOR_TAB_ID]: anchorBlob } },
+    })
+    const ws = openSocket(probe)
+    const countSettings = (): number => messagesOf(ws).filter(message => message.type === 'settings').length
+    expect(countSettings()).toBe(1)
+
+    // 快照变化但设置不变：不重复推送（去重保护）。
+    probe.listeners.forEach(listener => listener())
+    expect(countSettings()).toBe(1)
+
+    // 用户在设置页改了值：下一次快照变化就把新值推给宿主。
+    probe.current.value = snapshot('s1', makeState(), {
+      pluginSettings: { [ANCHOR_TAB_ID]: { includeHiddenEntries: false, maxListedEntries: 2 } },
+    })
+    probe.listeners.forEach(listener => listener())
+    expect(countSettings()).toBe(2)
+    const last = messagesOf(ws).filter(message => message.type === 'settings').at(-1)!
+    expect(last.settings).toEqual({ includeHiddenEntries: false, maxListedEntries: 2 })
   })
 })

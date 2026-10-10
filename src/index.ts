@@ -29,6 +29,7 @@ import { attachSocket } from './host/bridge-socket.ts'
 import { BRIDGE_ACK_TIMEOUT_MS, BridgeServer } from './host/bridge-server.ts'
 import { ControllerStateStore } from './host/controller-state.ts'
 import { listDirectorySafe } from './host/fs-tree.ts'
+import { ListingSettingsStore } from './host/listing-settings.ts'
 import { pathKind, resolveLexicalTarget, resolveWorkspaceTarget } from './host/paths.ts'
 import { loadBundledSkill } from './host/skill-registration.ts'
 import { registerControllerTools } from './host/tools.ts'
@@ -54,6 +55,7 @@ export const BRIDGE_PATH = '/sidebar-controller/ws'
  */
 export function apply(ctx: Context): void {
   const store = new ControllerStateStore()
+  const listingSettings = new ListingSettingsStore()
   const removeService = ctx.provide('sidebarController', {
     id: 'dsh-better-sidebar-controller' as const,
     getState: (sessionId: string) => store.get(sessionId),
@@ -61,6 +63,7 @@ export function apply(ctx: Context): void {
   })
   const bridge = new BridgeServer({
     store,
+    listingSettings,
     resolveWorkspaceRoot: async (sessionId) => {
       const session = ctx.sessions.get(sessionId)
       const cwd = session?.header?.cwd
@@ -106,6 +109,7 @@ export function apply(ctx: Context): void {
     resolveLexical: resolveLexicalTarget,
     pathKind,
     listDirectory: listDirectorySafe,
+    listingSettings: (sessionId: string) => listingSettings.get(sessionId),
     ackTimeoutMs: BRIDGE_ACK_TIMEOUT_MS,
   })
 

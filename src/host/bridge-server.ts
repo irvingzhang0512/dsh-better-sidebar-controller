@@ -12,6 +12,7 @@
 import { randomUUID } from 'node:crypto'
 import type { ClientToHostMessage, CommandAck, ControllerCommand, DispatchOutcome, SidebarStateWire } from '../shared/types.ts'
 import { ControllerStateStore } from './controller-state.ts'
+import { ListingSettingsStore } from './listing-settings.ts'
 
 /** How long a dispatched command waits for the client's ack by default. */
 export const BRIDGE_ACK_TIMEOUT_MS = 4000
@@ -22,6 +23,12 @@ export type Sender = (message: string) => void
 export interface BridgeOptions {
   /** The state mirror the client pushes into. */
   store: ControllerStateStore
+  /**
+   * The per-session side-card listing-settings mirror (SPEC F009). Optional:
+   * the bridge owns one when not supplied, so a host that only reads the
+   * defaults still works.
+   */
+  listingSettings?: ListingSettingsStore
   /** Resolve a session's workspace root (its cwd). */
   resolveWorkspaceRoot: (sessionId: string) => Promise<string | null>
   /** Optional clock injection for tests. */
@@ -30,6 +37,7 @@ export interface BridgeOptions {
 
 export class BridgeServer {
   readonly store: ControllerStateStore
+  readonly listingSettings: ListingSettingsStore
   private sockets = new Map<string, Set<Sender>>()
   private queues = new Map<string, Array<{ id: string; command: ControllerCommand }>>()
   private pending = new Map<string, { resolve: (ack: CommandAck | null) => void; timer: ReturnType<typeof setTimeout> }>()
@@ -37,6 +45,7 @@ export class BridgeServer {
 
   constructor(private options: BridgeOptions) {
     this.store = options.store
+    this.listingSettings = options.listingSettings ?? new ListingSettingsStore()
   }
 
   /** Whether at least one client is attached for the session. */
@@ -74,6 +83,12 @@ export class BridgeServer {
         break
       case 'state':
         this.applyState(sessionId, message.state)
+        break
+      case 'settings':
+        // SPEC F009: the side-card settings travel on their own message so a
+        // settings-only change reaches the host even when the semantic state
+        // is unchanged.
+        this.listingSettings.apply(sessionId, message.settings)
         break
       case 'command-result':
         this.onAck(message.result)
@@ -118,6 +133,7 @@ export class BridgeServer {
     this.queues.clear()
     this.sockets.clear()
     this.roots.clear()
+    this.listingSettings.dispose()
   }
 
   // ── internals ───────────────────────────────────────────────────────────

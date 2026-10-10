@@ -1,6 +1,6 @@
-import type { ControllerCode, ControllerCommand, ControllerState, DispatchOutcome } from '../shared/types.ts';
+import type { ControllerCode, ControllerCommand, ControllerState, DispatchOutcome, ListingSettings } from '../shared/types.ts';
 import type { ControllerStateStore } from './controller-state.ts';
-import type { ListDirectoryResult } from './fs-tree.ts';
+import type { ListDirectoryOptions, ListDirectoryResult } from './fs-tree.ts';
 import type { PathKindResult, PathResolveResult } from './paths.ts';
 /** Every tool name (kept in sync for SKILL/docs contract tests). */
 export declare const CONTROLLER_TOOL_NAMES: readonly ["get_sidebar_state", "show_sidebar", "hide_sidebar", "list_files", "expand_folder", "collapse_folder", "refresh_tree", "open_file", "close_file", "activate_file", "reopen_previous_file"];
@@ -18,7 +18,12 @@ export interface ControllerDeps {
     resolveTarget(cwd: string, raw: string): Promise<PathResolveResult>;
     resolveLexical(cwd: string, raw: string): PathResolveResult;
     pathKind(path: string): Promise<PathKindResult>;
-    listDirectory(path: string, maxEntries?: number): Promise<ListDirectoryResult>;
+    listDirectory(path: string, options?: ListDirectoryOptions): Promise<ListDirectoryResult>;
+    /**
+     * Effective side-card listing settings for one session (SPEC F009).
+     * Optional so a host without the settings mirror keeps the defaults.
+     */
+    listingSettings?(sessionId: string): ListingSettings;
     /** How long a dispatched command waits for the client ack. */
     ackTimeoutMs?: number;
 }

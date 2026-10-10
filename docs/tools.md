@@ -38,7 +38,8 @@
 - 返回：`path`、`entries[]`（`name` / `path` / `isDir` / `hidden` / `isSymlink` /
   `broken`）、`truncated`。
 - 说明：单层列举；目录优先、大小写不敏感排序；隐藏文件带 `hidden: true`。行为受侧边卡片设置
-  `includeHiddenEntries`／`maxListedEntries` 影响（默认返回隐藏项、上限 1000；见 [SPEC.md](SPEC.md) 的 F009）。
+  `includeHiddenEntries`／`maxListedEntries` 影响（先过滤隐藏项、再按上限截断，隐藏项不占用行数
+  配额；默认返回隐藏项、上限 1000；见 [SPEC.md](SPEC.md) 的 F009）。
 
 ### 5. `expand_folder`
 - 参数：`path`（文件夹路径，相对或绝对）。
@@ -51,7 +52,9 @@
 
 ### 7. `refresh_tree`
 - 参数：无。返回：`rootPath`、`entries[]`、`truncated`、`delivered` / `queued`。
-- 说明：刷新文件树（重新读取工作区根目录，并让 Sidebar 重载已展开目录）。
+- 说明：刷新文件树（重新读取工作区根目录，并让 Sidebar 重载已展开目录）。返回的根目录条目与
+  `list_files` 共用同一套侧边卡片设置 `includeHiddenEntries`／`maxListedEntries`（先过滤隐藏项、
+  再按上限截断；默认返回隐藏项、上限 1000；见 [SPEC.md](SPEC.md) 的 F009）。
 
 ### 8. `open_file`
 - 参数：`path`（文件路径，相对或绝对）。

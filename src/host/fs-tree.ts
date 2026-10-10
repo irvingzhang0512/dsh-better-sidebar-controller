@@ -5,6 +5,11 @@
  * `hidden`, symlinks stat'ed once to expose their target kind, dangling
  * links flagged `broken`, and a row bound that flags `truncated`.
  *
+ * The bound and the hidden-row policy come from the user's side-card
+ * settings (SPEC F009) and are applied in a fixed order: FILTER first,
+ * then TRUNCATE — so excluded hidden rows never consume the visible rows'
+ * quota.
+ *
  * This module is a self-contained reimplementation of the same helpers in
  * dsh-better-sidebar's src/fs-tree.ts (which the published package does not
  * expose as a runnable entry) — behavior is kept in lockstep so the agent's
@@ -43,8 +48,35 @@ export type ListDirectoryResult =
   | { ok: true; listing: FsListing }
   | { ok: false; code: 'NOT_A_DIRECTORY' | 'FILE_NOT_FOUND' | 'FS_ERROR'; message: string }
 
-/** List one directory level, returning a structured result. */
-export async function listDirectorySafe(path: string, maxEntries = 1000): Promise<ListDirectoryResult> {
+/**
+ * Options of one level listing (SPEC F009 侧边卡片设置).
+ *
+ * Order matters and is deliberate: entries are filtered by
+ * `includeHiddenEntries` FIRST, then counted against `maxListedEntries` —
+ * hidden rows must not eat the visible rows' quota. `truncated` therefore
+ * means "there are more ELIGIBLE rows than the bound", not "the directory
+ * has more rows".
+ */
+export interface ListDirectoryOptions {
+  /** Return dot-prefixed rows (still flagged `hidden`); default true. */
+  includeHiddenEntries?: boolean
+  /** Row bound of this level; default 1000. */
+  maxListedEntries?: number
+}
+
+/**
+ * List one directory level, returning a structured result.
+ *
+ * Accepts a bare number for backward compatibility (older call sites passed
+ * `listDirectorySafe(path, 2)`).
+ */
+export async function listDirectorySafe(
+  path: string,
+  options: number | ListDirectoryOptions = {},
+): Promise<ListDirectoryResult> {
+  const normalized: ListDirectoryOptions = typeof options === 'number' ? { maxListedEntries: options } : options
+  const includeHiddenEntries = normalized.includeHiddenEntries !== false
+  const maxListedEntries = normalized.maxListedEntries ?? 1000
   let level
   try {
     level = await opendir(path)
@@ -59,7 +91,10 @@ export async function listDirectorySafe(path: string, maxEntries = 1000): Promis
   let overflow = 0
   try {
     for await (const dirent of level) {
-      if (rows.length >= maxEntries) {
+      const hidden = dirent.name.startsWith('.')
+      // Filter BEFORE the bound: a skipped hidden row must not consume quota.
+      if (hidden && !includeHiddenEntries) continue
+      if (rows.length >= maxListedEntries) {
         overflow += 1
         continue
       }
@@ -69,7 +104,7 @@ export async function listDirectorySafe(path: string, maxEntries = 1000): Promis
         isDir: dirent.isDirectory(),
         isSymlink: dirent.isSymbolicLink(),
         broken: false,
-        hidden: dirent.name.startsWith('.'),
+        hidden,
       })
     }
   } catch (error) {

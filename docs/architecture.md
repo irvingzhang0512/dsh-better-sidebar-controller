@@ -86,7 +86,8 @@ Controller State（host 镜像，工具返回）：
 
 - 端点：`/sidebar-controller/ws?sessionId=<会话id>`，浏览器信任围栏与 `/api` 网关一致
   （Host-header 回环 + `trustedHosts` + Origin 同源，见 `trust-fence.ts`）。
-- client → host：`hello`（附加即重放队列）、`state`（语义状态回推）、`command-result`（ack）。
+- client → host：`hello`（附加即重放队列）、`state`（语义状态回推，可带可选 `settings`）、
+  `settings`（侧边卡片设置同步，F009；与 `state` 分开发以便设置单独变化时也能送达）、`command-result`（ack）。
 - host → client：`command { id, command }`。
 - **投递语义**（镜像 better-sidebar `sidebar_open` 的 consume-on-send + replay）：
   - 有连接：立即下发，等待 ack（默认 4s，超时返回 `BRIDGE_TIMEOUT`）；
@@ -131,19 +132,38 @@ opendir 流式、目录优先 + 大小写不敏感排序、隐藏点前缀标记
 | `includeHiddenEntries` | `switch` | `true` | 单层列举是否返回点开头的隐藏项（返回时仍带 `hidden` 标记） |
 | `maxListedEntries` | `number`（`min: 1`） | `1000` | 单层列举行数上限，超出时结果标 `truncated` |
 
-两项作用于 `list_files` 与 `refresh_tree` 共用的单层列举（`fs-tree.ts` 的 `maxEntries` 默认值）。
+两项作用于 `list_files` 与 `refresh_tree` 共用的单层列举（`fs-tree.ts` 的 `ListDirectoryOptions`：
+先按 `includeHiddenEntries` 过滤、再按 `maxListedEntries` 计数截断，因此隐藏项不会占用行数配额；
+`truncated` 表示仍有**符合过滤条件**的行未返回）。
 `ackTimeoutMs`（桥接等待 ack 的默认 4s）**不进卡片**：它是宿主组装层的工程参数（`src/index.ts` 传给
 `registerControllerTools` 的 `BRIDGE_ACK_TIMEOUT_MS`），用户日常不会调整，继续留在组装层配置。
 
 **读取与生效**：浏览器半边通过公开 service 快照读
 `service.getSnapshot().prefs.pluginSettings['dsh-better-sidebar-controller:anchor']`，并用
-`service.subscribe` / `service.subscribeState` 跟踪变化；两项值经既有桥接同步给宿主半边
-（客户端→宿主的 `state` 推送需新增可选字段，见 `src/shared/wire.ts`），宿主在下一次
-`list_files` / `refresh_tree` 调用时使用。无客户端连接时宿主按默认值列举，不失败。
+`service.subscribeState`（即 `service.subscribe`，prefs 就在快照里、由 `setPrefs` 通知）跟踪变化；
+两项值经既有桥接同步给宿主半边，宿主在下一次 `list_files` / `refresh_tree` 调用时使用。
+无客户端连接时宿主按默认值列举，不失败。
+
+**实现位置**（F009）：
+
+| 环节 | 位置 |
+| --- | --- |
+| 描述符标题「文件树与列表」与两行 `pluginToggles` | `src/client/index.ts`（`ANCHOR_TITLE`、`registerTab({ …, settings: { pluginToggles: [...] } })`） |
+| 读回 prefs 并归一（未设置→默认；非 `true` 视为关闭；越界按 `min`） | `src/client/index.ts` 的 `settingsFromSnapshot` |
+| 同步到宿主（设置变化即推；只在真正发出后推进去重键） | `src/client/index.ts` 的 `pushSettings` → `shared/wire.ts` 的 `settings` 消息 |
+| 协议字段与防御校验 | `src/shared/wire.ts`（`parseListingSettings`、`state.settings` 可选字段）、`src/shared/types.ts`（`ListingSettings` / `LISTING_SETTINGS_DEFAULTS` / `MAX_LISTED_ENTRIES_MIN`） |
+| 每会话镜像与非法值回落 | `src/host/listing-settings.ts`（`ListingSettingsStore` / `resolveListingSettings`） |
+| 桥接收与分发 | `src/host/bridge-server.ts`（`case 'settings'`；断开/`dispose` 时清空镜像） |
+| 列举时先过滤再截断 | `src/host/fs-tree.ts`（`ListDirectoryOptions.includeHiddenEntries` / `maxListedEntries`）、`src/host/tools.ts`（`getListingOptions`） |
+| 宿主装配 | `src/index.ts`（`new ListingSettingsStore()` 同时给 bridge 与 tools） |
+
+两项是 better-sidebar 的**用户级**（全局）设置，但宿主镜像是**按会话**的：客户端在会话切换时
+重置去重键并补推一次，因此每个会话都能拿到当前值；没有推送过的会话读默认值。
 
 **降级**：better-sidebar 缺失，或版本低于 0.12.0（能力列表 `service.features` 不含 `pluginSettings`，
 老版本可能没有该字段）时，两项回退硬编码默认值（返回隐藏项、上限 1000），插件与 11 个工具照常工作；
-只依赖公开 service，不访问私有 store。
+只依赖公开 service，不访问私有 store。客户端对 `prefs.pluginSettings` 逐层防御式读取，缺失或畸形
+（含 `snapshot.prefs` 不存在）时按默认值处理并照常送出，不抛错。
 
 **上游机制的已知限制**（如实记录，非本插件可改）：卡片上的设置行只在卡片启用
 （`tabsEnabled[id] !== false`）时渲染；该机制没有「重置为默认／标记被覆盖」与 revision 冲突保护；
