@@ -16,7 +16,8 @@ export function attachSocket(
   parse: (text: string) => ClientToHostMessage,
 ): void {
   const sender: Sender = (message) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(message)
+    if (ws.readyState !== WebSocket.OPEN) throw new Error('socket closed')
+    ws.send(message)
   }
   const detach = bridge.attach(sessionId, sender)
   ws.on('message', (data) => {

@@ -1,277 +1,82 @@
 # 架构说明（Architecture）
 
-`dsh-better-sidebar-controller` 是 [dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar)
-的 **Agent 控制层**：它不重新实现文件树、标签页或编辑器 UI，而是把 better-sidebar 的既有能力
-以「一组稳定的工具 + 一份 Skill」暴露给 DSH Agent，让用户用自然语言控制侧边栏文件工作区。
+## 增强控制层目标契约
 
-```
-用户自然语言
-   │
-   ▼
-DSH Agent ──加载──► Controller Skill (skills/sidebar-controller/SKILL.md)
-   │                    （自然语言 → 工具调用 的映射）
-   ▼
-Controller Tools（11 个，host 半，src/host/tools.ts）
-   │                    （结构化结果 + 错误码；路径校验与工作区围栏）
-   ▼
-Bridge（host 半 src/host/bridge-server.ts ↔ client 半 src/client/index.ts）
-   │                    （WebSocket + 命令队列/重放 + 状态回推）
-   ▼
-better-sidebar 服务（ctx.betterSidebar：openFile / closeTab / activateTab / registerTab…）
-   │                    （用户鼠标操作与 Agent 操作共用同一份状态）
-   ▼
-文件树 / 标签页 / 编辑器
-```
+文档版：`sidebar-enhancement-20261011-v1`；对应 [SPEC F010–F013](SPEC.md#本次增强文档版与适用范围)。用户已确认，源码已实现（验证见 [交付记录](VERIFICATION-0.3.0.md)）；目标 DSH `0.2.0-rc.2`、better-sidebar `0.25.0`。本节维护当前实现契约；旧组合的历史验证不作为新版兼容证据。
 
-## 分层与模块边界
+### 设置权威、读取与生命周期
 
-| 层 | 位置 | 职责 |
-| --- | --- | --- |
-| State | `src/shared/derive.ts` + `src/host/controller-state.ts` | 从 better-sidebar 快照推导语义状态（当前文件 / 上一个文件 / 已打开文件 / 已展开文件夹 / 侧边栏显隐），并维护 host 侧每会话镜像 |
-| Bridge | `src/host/bridge-server.ts`、`src/host/bridge-socket.ts`、`src/shared/wire.ts`、`src/client/index.ts` | host ↔ 浏览器客户端的双向通道：命令下发、ack、状态回推、断线重连、队列重放 |
-| Tools | `src/host/tools.ts` | 11 个明确的、单一职责的工具（无万能 command 工具） |
-| Skill | `src/host/skill-registration.ts` + `skills/sidebar-controller/SKILL.md` | **自注册技能**：host 挂载时把打包的 SKILL.md 注册进 `ctx.skills`，装插件即装技能；SKILL.md 仍是唯一事实源（自然语言 → 工具映射与约定） |
-| 支撑 | `src/host/paths.ts`、`src/host/fs-tree.ts`、`src/host/trust-fence.ts`、`src/context-types.ts` | 路径解析/围栏、目录列举、信任围栏、结构镜像类型 |
+- 复用公开 better-sidebar 设置描述符，固定 id `dsh-better-sidebar-controller:anchor`，标题「Sidebar Controller 增强控制」，保持隐藏、不进新建菜单、不残留标签的约束。
+- 持久配置：打开取 better-sidebar 的 `agentOpenTools === true`；管理取 `pluginSettings[ANCHOR_ID].agentControlTools === true`（未设置即 false）。列举仍取同一 blob 的 `includeHiddenEntries`（缺省 true）与 `maxListedEntries`（缺省 1000，有限数字取整且至少 1）。未知字段不删除。
+- 宿主等待 loader 就绪，按 `entry.options.name === 'dsh-better-sidebar'` 找实际活动加载条目，使用其真实 `options.id` 作为设置命名空间；不固定为 `better-sidebar`，支持聚合 bundle 的不同 id。只接受启用、实际活动且声明兼容目标组合的条目；不能仅凭包存在或安装快照判为可用。无法唯一确定活动条目时报告不可用，不猜测一个命名空间。
+- 使用宿主公开 settings 读取上游完整有效值，不创建控制器独立 settings section 或文件。依赖停用、上游 effective disabled／external disable 状态、`tabsEnabled[ANCHOR_ID] === false` 或设置读取失败时停止模型能力。不能将“没有客户端”解释为“没有依赖”，也不能将客户端 hello 解释为“权限已开启”。
+- 工具门禁的权威读取得到后才注册；在对应服务上下文观察配置/加载变化，另有 500 毫秒补充检查，定时器释放且不阻止宿主退出。注册与移除幂等；每次工具执行、发送及重放前重新读取门禁。不修改上游工具注册或偏好。
+- 内部 `sidebarController` 服务保持 `id/getState/subscribe` 形状，工具关闭仍同步已连接有效界面的文件状态；依赖不可用则状态标 disconnected、文件候选为空，通知订阅者，不暴露陈旧候选供工作台操作。
 
-约束：代码与 API 使用英文命名；文档全部为中文；本插件 **不包含** Structured Document
-节点操作能力（需求 §21 的后续版本），当前版本只做文件工作区控制。
+### 工具注册矩阵
 
-## 双半（host + client）形态
+以下数量仅计本插件，上游 `sidebar_open` 仍由上游注册。
 
-DSH 插件以 cordis 插件包发布。本插件拆成两半，通过 `dsh.bundle.patch`（`cordis.patch.yml`）
-与 `dsh.client` 声明挂入 profile：
+| 打开 | 管理 | 注册工具 |
+|---|---|---|
+| 关 | 关 | 无 |
+| 开 | 关 | `better_sidebar_open`、`open_file`（2） |
+| 关 | 开 | `get_sidebar_state`、`show_sidebar`、`hide_sidebar`、`list_files`、`expand_folder`、`collapse_folder`、`refresh_tree`、`close_file`、`activate_file`（9） |
+| 开 | 开 | 上述全部及 `reopen_previous_file`（12） |
 
-- **host 半**（`src/index.ts`）：`inject = ['tools','webServer','sessions','webRuntime']`。
-  - 注册 11 个工具；
-  - 在 `/sidebar-controller/ws` 注册 HTTP Upgrade 端点（WebSocketServer, `noServer` 模式）；
-  - 维护每会话的 ControllerState 镜像；
-  - 通过 `ctx.sessions.get(id).header.cwd` 解析会话工作区根目录（回退 `process.cwd()`）。
-- **client 半**（`src/client/index.ts`）：`inject = ['betterSidebar']`（**软依赖**：
-  better-sidebar 未安装时该半永远不激活，host 半照常工作）。
-  - 订阅 `service.subscribeState`，把每次快照推导出的语义状态推给 host；
-  - 为当前活动会话建立 WS 连接，接收并执行工具命令，回传 ack；
-  - 通过隐藏 anchor 标签页捕获 `SidebarStore`（见下文设计决策 D1）。
+内部 `sync_state` 不属于模型工具，不受模型开关影响，但需要有效依赖与正确会话连接。关闭某组只移除对应工具与该组队列；关闭任一组即移除返回上一文件工具及其队列。已送达并执行的动作不回滚，原标签不关闭。
 
-## 状态模型（4.1 的落地）
+### 设置卡与说明入口
 
-Controller State（host 镜像，工具返回）：
+设置页面复用上游 descriptor 的公开 `settings.render`／插件设置写入接口，不修改上游源码。卡片保持上游外观：能力标题与说明在左、控件在右；有效显示值使用上面的默认归一，不再出现默认显示关闭而实际开启的差异。
+
+- 打开行仅显示有效状态、原开关位置「本页 → 常规 → 为模型注入侧边栏打开工具」及作用，不创建第二个存储键或独立编辑开关。
+- 管理开关：`agentControlTools`，说明涵盖状态查询、文件关闭/切换、目录与显隐；关闭时隐藏隐藏项和列表上限两行，保留说明、上游关联状态与使用指南。
+- 现有描述符启用开关关闭表示控制器扩展停用；不能把隐藏锚点的启用开关误显示为新的工具许可。
+- 使用指南在客户端随包提供只读的同版说明视图，由卡片内「查看 Agent 使用说明」展开／收起，不新增侧栏页签、独立设置分区或外部站点依赖。内容包含全部工具映射、完整流程与结果说明，与 docs/usage.md 静态核对；README 可链接同版仓库文档。
+- 用上游公开 helper 保存 pluginSettings，合并当前 blob 与未知键；保存失败显示错误且保持上次有效值，不做未持久化的乐观授权。持久设置只有上游一份。
+
+### 打开接口与桥接协议
+
+模型参数：`better_sidebar_open({ target: string, title?: string })`，不接收 sessionId、action、kind；会话从调用 Agent 确定。宿主将 target 分类为 `file | folder | url`，本地路径按该会话 cwd 解析并规范化（允许外部真实路径），网页仅接受 HTTP(S)，Windows 盘符不判为协议；空白目标失败，空白标题回落到文件名／目录名／主机名。增强打开遵循上游标题支持，结果中的 title 表示提交给上游的建议标题，不保证原生 UI 改写默认标题。
+
+规范输出：所有返回含 `ok:boolean/code:string/message:string`。分类成功后的返回再含 `kind/target/title/delivered/queued`；target 是规范化绝对路径或验证后的 HTTP(S) URL。参数／路径分类前失败不伪造 kind 等字段；未连接排队为 `ok:true/code:QUEUED/delivered:false/queued:true`；已送达未确认为 `ok:false/code:BRIDGE_TIMEOUT/delivered:true/queued:false`；队列满为 `ok:false/code:QUEUE_FULL/delivered:false/queued:false`；执行确认成功才 `OK`。
+
+桥接保持 `/sidebar-controller/ws?sessionId=…` 及原信任围栏，新命令形状：
 
 ```ts
-{
-  sessionId, sidebarVisible,
-  currentFile: string | null,      // 4.2：无选中文件时为 null
-  previousFile: string | null,
-  openedFiles: string[],           // 已打开文件（去重，按打开顺序）
-  expandedFolders: string[],       // 已展开文件夹（绝对路径）
-  workspaceRoot: string | null,
-  connected: boolean, updatedAt: number
-}
+{ name: 'better_sidebar_open', kind: 'file' | 'folder' | 'url', target: string, title: string }
 ```
 
-**current_file / previous_file 推导规则**（`deriveFileContext`，纯函数，client 权威，
-完全满足 §4.3 的 meeting → project → source → meeting 示例）：
+仅宿主生成分类命令。客户端验证形状、当前 mounted session 与连接绑定一致，并重新检查公开 prefs 门禁、目标页面可用性后调用公开 API。文件走 `betterSidebar.openFile(scope, target, title)`；目录走上游 editor seed（path、title、`meta.dir:true`）；网页走公开原生 `sidebarRight.openTab('browser', { params: { url: target } })`，遵循上游支持的标题行为；不使用不存在的 `betterSidebar.openUrl`，不复制或导入上游私有 AgentOpenRegistry。
 
-- `current === null`（关闭当前文件）：`previous = 原 current ?? 原 previous`；
-- `current === 原 current`（当前文件未变）：两个字段都不动；
-- 其他情况（切到新文件）：`previous = 原 current ?? 原 previous`。
+`open_file` 保留原参数/输出、NOT_A_FILE 和工作区真实路径围栏；目录操作的围栏不变。新客户端与宿主同步交付，移除旧 `settings` 消息和 `state.settings` 有效处理及配置镜像对象，旧客户端不得通过这些载荷改变宿主门禁或列举值；旧客户端无新命令能力时不虚报成功。
 
-所有鼠标操作（打开、关闭、激活、切标签）都经过 `subscribeState` 进入同一推导，因此
-**用户与 Agent 看到的是同一份 current/previous**（需求 2.2）。
+### 状态、文件控制与投递
 
-`opened_files` 来自对 split 树 + 底部面板 + 浮动窗口的遍历；`expanded_folders` 直接取
-`state.expanded`。浏览器侧每次「语义变化」才推送（面板宽度变化等不刷屏），host 侧每会话
-独立维护镜像，断线时保留最后已知状态并标记 `connected: false`。
+- 原生状态使用公开 `sidebarRight.openTabs`、`mounted`、`active()`，资源地址通过宿主公开资源语法解析；内部 tab id 不再假设等于 `editor:<path>`。底部状态继续读 better-sidebar 公共快照。以 mounted 会话的活动文件为准；前台在网页、目录或其他页面时 currentFile 为空，不从底部旧活动标签猜测当前文件。合并已打开文件时按真实文件路径去重，按会话隔离。
+- 订阅标签清单、mounted 与 better-sidebar 快照变化；只在桥接已连接且 mounted 为对应会话时 500 毫秒补读活动标签。查询状态、命令执行及 ack 前立即读取；状态推送只有真正发送后推进去重键，hello/重连/换会话/sync_state 强制发当前状态。清理所有订阅、定时器与 socket。
+- `close_file/activate_file` 的工作区外目标仅允许匹配该会话真实已打开文件，不把打开过某外部文件变成任意外部路径授权；`reopen_previous_file` 使用该会话记录的真实上一文件，并重新验证它可访问。文件不存在或无上一文件用原错误码。通过 native close/focus 或 better-sidebar closeTab/activateTab 操作对应真实 tab，公开接口严格 no-op 不能当作成功。
+- UI 非活动会话的命令保留宿主队列，不把原生当前会话写接口当成跨会话接口。连接也须确认 mounted 目标会话；竞态不允许在错误会话执行，返回明确失败/继续等待而非伪造 OK。
+- 每会话队列 64 条，入队失败反馈 QUEUE_FULL；关闭权限或依赖失效清理相关未执行条目，依赖失效清空全部队列与等待者。重放逐条检查权限后发送，发送后消费；已发送不在重连时自动再执行。保持原 4 秒确认超时；超时消息要求先查询状态而非无条件重试。
+- 结构化失败：已注册工具的竞态关闭用 `TOOL_DISABLED`；依赖/界面不可用用 `SIDEBAR_UNAVAILABLE`；设置不可读用 `SETTINGS_UNAVAILABLE`；队列满用 `QUEUE_FULL`；网页非法协议用 `INVALID_TARGET`，缺失／不可读路径沿用相应路径错误码。错误不抛出普通业务异常，文本投影与 canonical JSON 含义一致。
 
-## 桥接协议（Bridge）
+### 配置迁移、验收与非目标
 
-- 端点：`/sidebar-controller/ws?sessionId=<会话id>`，浏览器信任围栏与 `/api` 网关一致
-  （Host-header 回环 + `trustedHosts` + Origin 同源，见 `trust-fence.ts`）。
-- client → host：`hello`（附加即重放队列）、`state`（语义状态回推，可带可选 `settings`）、
-  `settings`（侧边卡片设置同步，F009；与 `state` 分开发以便设置单独变化时也能送达）、`command-result`（ack）。
-- host → client：`command { id, command }`。
-- **投递语义**（镜像 better-sidebar `sidebar_open` 的 consume-on-send + replay）：
-  - 有连接：立即下发，等待 ack（默认 4s，超时返回 `BRIDGE_TIMEOUT`）；
-  - 无连接：命令入队（有界 64 条），工具立即返回 `{ ok: true, code: 'QUEUED' }`，
-    下一次该会话的客户端 attach（hello）时按序重放；
-  - 客户端执行成功回 `OK`，失败回具体错误码（如 `FILE_NOT_OPEN`）。
-- 协议编解码集中在一处（`src/shared/wire.ts`），防御式校验，畸形消息丢弃不杀连接。
+持久键未改名，不批量搬迁或清空 pluginSettings。新增 agentControlTools 缺省关闭，旧用户不会因原先 11 个工具始终注册而自动得到 true。迁移验收检查真实原始旧配置：缺失 blob、只含一个列举键、显式隐藏项开/关、异常上限、描述符关闭及其他插件未知键；读取不写入伪造默认值，单字段保存不覆盖其他键。重复保存/重启不丢值，不复活已移除的配置镜像读取。
 
-## 工具如何操作 better-sidebar（能力映射）
+运行验证包括四种工具矩阵、动态移除与队列清理、设置故障、依赖停用、中文/外部路径、native/browser 缺能力、双会话、状态首次补推与强制同步、文件控制、工作台候选、生命周期和真实 desktop UI；typecheck/test/build 与客户端产物冒烟分别记录。纯文档阶段只做链接/契约一致性/差异空白检查，不改运行技能、源码、测试、包版本或 lib；不恢复旧 web，不新增网页/目录窗口关闭工具，不自动推送。
 
-| 工具 | 实现通道 | 说明 |
-| --- | --- | --- |
-| `get_sidebar_state` | 读 host 镜像；若已连接先发 `sync_state` 强制刷新 | 保证回答不陈旧 |
-| `show_sidebar` / `hide_sidebar` | `store.reduce(s => ({...s, panelOpen: true/false}))` | 见 D1 |
-| `expand_folder` / `collapse_folder` | `store.reduce` 增删 `state.expanded` | 作用于当前可见 Sidebar（见 D3） |
-| `refresh_tree` | `window.dispatchEvent(new Event('dsh-sidebar:refresh-files'))` + host 重列根目录 | better-sidebar 文档化的集成点 |
-| `open_file` | `service.openFile(scope, absPath)` | 已打开则自动聚焦（per-path 去重） |
-| `close_file` | 扫描快照找 tab → `service.closeTab(tab.id)` | 支持 splits / bottomSplits / floats |
-| `activate_file` | 同上 → `service.activateTab(tab.id)` | 仅对已打开文件生效 |
-| `reopen_previous_file` | 用镜像里的 `previous_file` 走 `open_file` | 永不自行拼路径 |
-| `sync_state` | 客户端重算并回推状态 | 内部命令，不暴露为工具 |
+## 原组合历史与独立升级差异
 
-所有路径参数：相对路径按会话 cwd 解析，绝对路径直用（含 WSL 投影）；`realpath` 规范化 +
-工作区包含校验（`resolveWorkspaceTarget` / `resolveLexicalTarget`），越界一律
-`PATH_OUTSIDE_WORKSPACE`。目录列举（`fs-tree.ts`）自包含复刻 better-sidebar 语义：
-opendir 流式、目录优先 + 大小写不敏感排序、隐藏点前缀标记、符号链接探测、行数上限截断。
+旧版本设计保存在 Git 历史，当前运行契约以上文为准；已删除配置镜像／旧设置消息，不能使用历史默认注册 11 工具或 activateTab no-op 的旧假设指导新版开发。原升级文档差异单独保留，本次不替其他插件确认升级。
 
-## 配置契约（侧边卡片设置）
+## 实现入口
 
-本插件不在自己的 cordis 配置里声明用户可调项，而是复用 [better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar)
-注册的「设置 → 侧边卡片」页（slot `settings.section`）。该页为**每个已注册 tab 描述符**渲染一张卡片
-（清单是 `[...service.getTabs()].sort(tabOrder)`，不过滤 `hidden`），卡片可声明
-`TabDescriptor.settings.pluginToggles` 设置行（v0.12.0+，能力名 `pluginSettings`）：键是**插件本地键**，
-值持久化在 better-sidebar 自己的用户设置文档的 `pluginSettings[<描述符 id>]` 下，行控件支持
-`switch` / `text` / `number` / `select`。
-
-本插件唯一的描述符是隐藏锚点 tab（`dsh-better-sidebar-controller:anchor`，`hidden + single`），
-因此配置键为 `pluginSettings['dsh-better-sidebar-controller:anchor']`：
-
-| 字段 | 控件 | 默认 | 作用 |
-| --- | --- | --- | --- |
-| `includeHiddenEntries` | `switch` | `true` | 单层列举是否返回点开头的隐藏项（返回时仍带 `hidden` 标记） |
-| `maxListedEntries` | `number`（`min: 1`） | `1000` | 单层列举行数上限，超出时结果标 `truncated` |
-
-两项作用于 `list_files` 与 `refresh_tree` 共用的单层列举（`fs-tree.ts` 的 `ListDirectoryOptions`：
-先按 `includeHiddenEntries` 过滤、再按 `maxListedEntries` 计数截断，因此隐藏项不会占用行数配额；
-`truncated` 表示仍有**符合过滤条件**的行未返回）。
-`ackTimeoutMs`（桥接等待 ack 的默认 4s）**不进卡片**：它是宿主组装层的工程参数（`src/index.ts` 传给
-`registerControllerTools` 的 `BRIDGE_ACK_TIMEOUT_MS`），用户日常不会调整，继续留在组装层配置。
-
-**读取与生效**：浏览器半边通过公开 service 快照读
-`service.getSnapshot().prefs.pluginSettings['dsh-better-sidebar-controller:anchor']`，并用
-`service.subscribeState`（即 `service.subscribe`，prefs 就在快照里、由 `setPrefs` 通知）跟踪变化；
-两项值经既有桥接同步给宿主半边，宿主在下一次 `list_files` / `refresh_tree` 调用时使用。
-无客户端连接时宿主按默认值列举，不失败。
-
-**实现位置**（F009）：
-
-| 环节 | 位置 |
-| --- | --- |
-| 描述符标题「文件树与列表」与两行 `pluginToggles` | `src/client/index.ts`（`ANCHOR_TITLE`、`registerTab({ …, settings: { pluginToggles: [...] } })`） |
-| 读回 prefs 并归一（未设置→默认；非 `true` 视为关闭；越界按 `min`） | `src/client/index.ts` 的 `settingsFromSnapshot` |
-| 同步到宿主（设置变化即推；只在真正发出后推进去重键） | `src/client/index.ts` 的 `pushSettings` → `shared/wire.ts` 的 `settings` 消息 |
-| 协议字段与防御校验 | `src/shared/wire.ts`（`parseListingSettings`、`state.settings` 可选字段）、`src/shared/types.ts`（`ListingSettings` / `LISTING_SETTINGS_DEFAULTS` / `MAX_LISTED_ENTRIES_MIN`） |
-| 每会话镜像与非法值回落 | `src/host/listing-settings.ts`（`ListingSettingsStore` / `resolveListingSettings`） |
-| 桥接收与分发 | `src/host/bridge-server.ts`（`case 'settings'`；断开/`dispose` 时清空镜像） |
-| 列举时先过滤再截断 | `src/host/fs-tree.ts`（`ListDirectoryOptions.includeHiddenEntries` / `maxListedEntries`）、`src/host/tools.ts`（`getListingOptions`） |
-| 宿主装配 | `src/index.ts`（`new ListingSettingsStore()` 同时给 bridge 与 tools） |
-
-两项是 better-sidebar 的**用户级**（全局）设置，但宿主镜像是**按会话**的：客户端在会话切换时
-重置去重键并补推一次，因此每个会话都能拿到当前值；没有推送过的会话读默认值。
-
-**降级**：better-sidebar 缺失，或版本低于 0.12.0（能力列表 `service.features` 不含 `pluginSettings`，
-老版本可能没有该字段）时，两项回退硬编码默认值（返回隐藏项、上限 1000），插件与 11 个工具照常工作；
-只依赖公开 service，不访问私有 store。客户端对 `prefs.pluginSettings` 逐层防御式读取，缺失或畸形
-（含 `snapshot.prefs` 不存在）时按默认值处理并照常送出，不抛错。
-
-**上游机制的已知限制**（如实记录，非本插件可改）：卡片上的设置行只在卡片启用
-（`tabsEnabled[id] !== false`）时渲染；该机制没有「重置为默认／标记被覆盖」与 revision 冲突保护；
-tab 卡片的第二行固定显示描述符 id（`desc: tab.id`），描述符的 `description` 不在卡片上渲染
-（它只用于宿主「+」菜单的引导列表，而锚点是 `hidden`，不会出现）——所以锚点卡片的可见修正是**标题**。
-锚点自身的启用开关也是上游统一行为：关闭后上游 `openTab` 拒绝并 `console.warn`，锚点无法挂载、
-store 捕获失败，依赖 store 的显隐／展开类命令随之不可用。
-
-## 会话作用域
-
-- 工具通过 `exec.agent.session.id` 绑定调用会话（模型永远不传 sessionId）。
-- cwd / workspace_root 由 host 从 session store 解析。
-- **打开/关闭/激活**通过 `service.openFile/closeTab/activateTab` 的 scope 支持任意会话；
-  **显隐/展开/收起**作用于当前可见的 Sidebar（见 D3）。
-
-## 错误码
-
-`OK / QUEUED / BRIDGE_NOT_CONNECTED / BRIDGE_TIMEOUT / SIDEBAR_UNAVAILABLE /
-NO_AGENT / NO_SESSION / INVALID_PATH / PATH_OUTSIDE_WORKSPACE / FILE_NOT_FOUND /
-FS_ERROR / NOT_A_DIRECTORY / NOT_A_FILE / FILE_NOT_OPEN / NO_CURRENT_FILE /
-NO_PREVIOUS_FILE / UNKNOWN_COMMAND / INTERNAL_ERROR`
-
-工具结果统一信封：`{ ok, code, message, ...工具专属字段 }`，另有纯文本 render 投影
-（结构化结果与展示分离，约定 C4/C10）。所有「业务失败」返回结构化结果而不是 throw；
-参数校验错误（如缺 `path`）由工具运行时（ToolArgsError）负责。
-
-## 设计决策记录
-
-### D1. 通过隐藏 anchor 标签页获取 store（最小侵入，无核心修改）
-
-better-sidebar 没有公开「改 `state.expanded` / `panelOpen`」的 service 方法；store 实例
-只通过组件 props 暴露。本插件注册一个 `hidden + single` 的 anchor 标签
-（`id: 'dsh-better-sidebar-controller:anchor'`），其 component 挂载时捕获 `props.store`，
-随即关闭该临时标签，然后用 `store.reduce` 修改 expanded / panelOpen —— 全程只使用**公开**的
-`registerTab` API，未修改 better-sidebar 任何核心代码。
-
-`hidden` 仅表示不出现在「+」菜单，不能隐藏已经打开的标签（v0.18.0），因此 anchor
-不能常驻。客户端在捕获 store 后通过微任务关闭它并恢复正常标签；切换会话时也会清理
-旧版本持久化布局中遗留的 anchor。
-
-**上游扩展建议**：给 `BetterSidebarService` 增加 `setExpanded(paths)` / `setPanelOpen(open)`
-（或通用的 `reduce`），即可让本插件在后续版本丢弃 anchor。
-
-### D2. QUEUED 语义（离线操作的确定性）
-
-工具在客户端未连接时**不失败**，而是入队并返回 `QUEUED`（真实世界：文件打开这类操作
-在侧边栏下次可见时自动落地，和 `sidebar_open` 一致）。消息里明确告知「已排队，将在
-Sidebar 可见时自动应用」。这是需求「打开/关闭/展开」在界面不可见时最友好的行为。
-
-### D3. 显隐/展开/收起作用于当前可见 Sidebar
-
-`panelOpen` 与 `expanded` 是**单份**活动会话状态，没有按会话区分（与标签页不同）。
-因此这三个命令天然只作用于当前可见的 Sidebar；跨会话的打开/关闭/激活则用 service scope
-实现。文档中如实标注该限制。
-
-### D4. host 侧自包含实现（不 import better-sidebar 内部模块）
-
-better-sidebar 发布物不导出 `fs-tree` / `path-security` / `trust-fence`（只有 src/ 内部
-文件，运行时不可 import）。本插件在 host 半**自包含复刻**了同语义实现（`fs-tree.ts`、
-`paths.ts`、`trust-fence.ts`），并注明与上游逐条对齐；client 半只 `import type`
-`dsh-better-sidebar/client/service`（类型在编译期被擦除，不产生运行时依赖）。
-
-### D5. sync_state：让「读状态」不陈旧
-
-`get_sidebar_state` 在客户端已连接时先发一个内部 `sync_state` 命令，等 ack 后读镜像，
-保证返回的就是当前状态；未连接时读镜像（可能为 `SIDEBAR_UNAVAILABLE`）。
-
-### D6. 结构化错误而非 throw
-
-大多数 DSH 工具约定「失败就 throw」。本插件把业务失败（路径越界、文件未打开、无上一
-文件等）**返回为带明确错误码的结构化结果**，让模型拿到机器可读的错误而不仅是错误文本；
-只有参数校验失败走运行时 ToolArgsError。两种失败模型在 SKILL 里都有对应话术。
-
-### D7. 技能自注册（装插件即装技能）
-
-需求要求「提供可工作的 SKILL.md」，但把技能做成第二个手动安装步骤（复制到 skills 目录）
-对发布和安装都很别扭。DSH 0.1.2-rc.1+ 的 `dsh-skill` 运行时提供 `ctx.skills` 注册中心，
-其中 `ctx.skills.register(skill)` 就是为插件在 `apply()` 期间注册技能设计的：
-
-- host 半新增 `inject: ['skills']`；挂载时读取包内 `skills/sidebar-controller/SKILL.md`
-  （`skill-registration.ts` 解析 YAML frontmatter：name / description / whenToUse，
-  支持 `>-` 折叠块），把它注册为 `source: 'bundled'`、`provider: 'dsh-better-sidebar-controller'`
-  的运行时技能，缺省 invocation = 模型与用户双面可用。
-- SKILL.md 仍是**唯一事实源**（人写的完整映射/约定/话术），注册只做「读文件 → 解析 → 注册」，
-  不复制、不生成。`files` 已包含 `skills/`，发布包自带该文件。
-- 挂载采用 cordis effect（卸载时自动反注册），文件读取是异步但 teardown 同步且带 disposed
-  竞态保护；`ctx.skills` 缺失时（旧版运行时）优雅跳过，主机端其余功能不受影响
-  （`dsh-skill` 是 optional peer，测试里同样提供 stub 断言注册发生）。
-- 结果：**`dsh plugin --profile web add dsh-better-sidebar-controller` 一条命令，插件 + 技能
-  一次装好**，Agent 技能目录自动出现 `sidebar-controller`。手动复制仅作为旧版 DSH 的兜底。
-
-与此相对，`dsh-skill-filesystem` 提供的是文件系统技能源（项目 `.dsh/skills`、用户
-`<dshHome>/skills`、`customSkillDirs`、`DSH_BUNDLED_SKILL_DIR` 等发现根）——对本插件
-无必要，反而引入「技能与包分开管理」的复杂度。
-
-## 测试策略
-
-- `tests/shared/derive.spec.ts`：current/previous 推导、快照投影、tab 查找（纯函数）。
-- `tests/shared/wire.spec.ts`：协议编解码往返 + 畸形输入拒绝。
-- `tests/host/bridge.spec.ts`：投递/队列/重放/超时/镜像合并（假发送者 + 注入时钟）。
-- `tests/host/bridge.integration.spec.ts`：真实 `ws` 端口上的端到端往返。
-- `tests/host/paths.spec.ts` / `fs-tree.spec.ts`：临时目录上的路径与列举语义。
-- `tests/host/tools.spec.ts`：11 个工具的结构化结果与错误码（假 bridge + 临时目录）。
-- `tests/register.spec.ts`：cordis Context 挂载冒烟（工具齐全、路由注册）。
-- `tests/skill.spec.ts`：SKILL.md 覆盖全部工具与自然语言意图（契约测试）。
-
-## 未来方向（当前版本不做）
-
-- Structured Document 节点操作（需求 §21 预留接口，不实现）。
-- 语音 STT 输入（Skill 层保持「自然语言 → 工具」形状，天然兼容，不实现）。
-- 按会话区分 `expanded` / `panelOpen` 的完整隔离（依赖上游 D1 建议）。
+- 宿主：src/index.ts、host/access.ts、host/tools.ts、host/bridge-server.ts。公开 settings.describe 和 configEditor 活动条目读取同一命名空间；pluginPackages.packageOf(name, entry.parent.tree.ctx.baseUrl) 确认实际解析包为 0.25.x，即使上游被风险豁免放行也不绕过本扩展版本检查。npm 的 optional peer 仅允许缺依赖时提供不可用内部状态，不代表功能可独立使用。
+- UI 与宿主共享 shared/listing-settings.ts 的有效值归一；旧负数／小数上限显示与执行一致，读设置不自动覆写原值。
+- 客户端：client/index.ts、native.ts、settings.ts。明确声明 betterSidebar/sessions/sidebarRight inject；mounted 早于 surface 就绪，临时锚点在实际渲染后清理，并通过公开清单关闭恢复出的真实锚点 tabId。
+- 首次打开先取 cwd，复用当前／底部已有文件，避免绝对地址与会话地址为同一文件建立重复标签。
+- desktop WebSocket 使用公开 __DSH_TRANSPORT__.streamBaseUrl，HTTP 继续使用 hostRouteUrl；官方 dsh-app://app 来源只在 loopback Host 且非 cross-site 标记下接受。
+- 同会话多视图只投递到首个有效连接，发送失败才尝试后续连接，避免在多个视图重复打开网页；所有界面仍按会话同步状态。
+- 运行与文档验证见 [交付记录](VERIFICATION-0.3.0.md)。

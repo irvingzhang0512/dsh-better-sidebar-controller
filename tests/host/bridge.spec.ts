@@ -86,6 +86,7 @@ describe('BridgeServer', () => {
 
   it('merges state pushes into the mirror with the workspace root', async () => {
     const { store, bridge } = makeBridge({ resolveRoot: async () => '/session-cwd' })
+    bridge.attach(SID, () => {})
     bridge.handleClientMessage(SID, {
       type: 'state',
       state: {
@@ -120,7 +121,7 @@ describe('BridgeServer', () => {
     await vi.waitFor(() => expect(store.get(SID)?.connected).toBe(false))
   })
 
-  it('broadcasts to every attached sender of the session', async () => {
+  it('delivers once when several views attach to the same session', async () => {
     const { bridge } = makeBridge()
     const a = recordingSender('a')
     const b = recordingSender('b')
@@ -128,7 +129,7 @@ describe('BridgeServer', () => {
     bridge.attach(SID, b.sender)
     await bridge.dispatch(SID, { name: 'refresh_tree' }, 20)
     expect(a.sent.length).toBe(1)
-    expect(b.sent.length).toBe(1)
+    expect(b.sent.length).toBe(0)
   })
 
   it('dispose rejects pending waits and drops queues', async () => {
@@ -169,39 +170,4 @@ describe('BridgeServer', () => {
     expect(JSON.parse(a.sent[0]!).command).toEqual({ name: 'sync_state' })
   })
 
-  it('mirrors the listing settings pushed by a client (SPEC F009)', () => {
-    const { bridge } = makeBridge()
-    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
-    bridge.handleClientMessage(SID, {
-      type: 'settings',
-      settings: { includeHiddenEntries: false, maxListedEntries: 4 },
-    })
-    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: false, maxListedEntries: 4 })
-    // A later push replaces the previous values.
-    bridge.handleClientMessage(SID, {
-      type: 'settings',
-      settings: { includeHiddenEntries: true, maxListedEntries: 8 },
-    })
-    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: true, maxListedEntries: 8 })
-  })
-
-  it('keeps the defaults when no client ever pushed settings, and drops them on dispose', () => {
-    const { bridge } = makeBridge()
-    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
-    bridge.handleClientMessage(SID, {
-      type: 'settings',
-      settings: { includeHiddenEntries: false, maxListedEntries: 2 },
-    })
-    bridge.dispose()
-    expect(bridge.listingSettings.get(SID)).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
-  })
-
-  it('keeps settings per session (a second session is unaffected)', () => {
-    const { bridge } = makeBridge()
-    bridge.handleClientMessage(SID, {
-      type: 'settings',
-      settings: { includeHiddenEntries: false, maxListedEntries: 2 },
-    })
-    expect(bridge.listingSettings.get('s-2')).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
-  })
 })

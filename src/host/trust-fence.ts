@@ -66,6 +66,8 @@ export function isTrustedApiRequest(request: TrustRequest, trustedHosts: readonl
   if (hostUrl === undefined) return false
   if (!isLoopbackHostname(hostUrl.hostname) && !isTrustedAuthority(hostUrl, trustedHosts)) return false
   if (header(request.headers, 'sec-fetch-site') === 'cross-site') return false
+  // Official desktop shell's custom-scheme origin, restricted to the local Host.
+  if (header(request.headers, 'origin') === 'dsh-app://app' && isLoopbackHostname(hostUrl.hostname)) return true
   const origin = header(request.headers, 'origin')
   if (origin === undefined) return true
   try {

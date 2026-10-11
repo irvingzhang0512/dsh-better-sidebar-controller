@@ -19,5 +19,6 @@ export declare class ControllerStateStore {
     list(): ControllerState[];
     subscribe(sessionId: string, listener: (state: ControllerState) => void): () => void;
     clear(): void;
+    invalidate(): void;
     private emit;
 }

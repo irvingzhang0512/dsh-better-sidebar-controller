@@ -6,13 +6,11 @@ import { describe, expect, it } from 'vitest'
 import {
   WireError,
   encodeAck,
-  encodeClientSettings,
   encodeClientState,
   encodeHostCommand,
   parseClientMessage,
   parseCommand,
   parseHostMessage,
-  parseListingSettings,
 } from '../../src/shared/wire.ts'
 
 const SID = 'session-abc'
@@ -74,65 +72,14 @@ describe('client → host messages', () => {
     const msg = parseClientMessage(text)
     expect(msg).toEqual({ type: 'command-result', result: { id: 'cmd-1', ok: true, code: 'OK', message: 'done', value: { path: '/a.md' } } })
   })
-  it('settings round-trips (SPEC F009)', () => {
-    const text = encodeClientSettings({ includeHiddenEntries: false, maxListedEntries: 3 })
-    expect(parseClientMessage(text)).toEqual({
-      type: 'settings',
-      settings: { includeHiddenEntries: false, maxListedEntries: 3 },
-    })
+  it('rejects retired client configuration messages', () => {
+    expect(() => parseClientMessage(JSON.stringify({ type: 'settings', settings: { agentOpenTools: true } }))).toThrow(WireError)
   })
-  it('state carries optional settings, and omits them when the client has none', () => {
-    const withSettings = parseClientMessage(JSON.stringify({
-      type: 'state',
-      state: {
-        sessionId: SID,
-        sidebarVisible: true,
-        currentFile: null,
-        previousFile: null,
-        openedFiles: [],
-        expandedFolders: [],
-        updatedAt: 0,
-        settings: { includeHiddenEntries: true, maxListedEntries: 1000 },
-      },
-    }))
-    expect(withSettings).toMatchObject({
-      type: 'state',
-      state: { settings: { includeHiddenEntries: true, maxListedEntries: 1000 } },
-    })
-    const without = parseClientMessage(encodeClientState({
-      sessionId: SID,
-      sidebarVisible: true,
-      currentFile: null,
-      previousFile: null,
-      openedFiles: [],
-      expandedFolders: [],
-      updatedAt: 0,
-    }))
-    expect(without).not.toHaveProperty('state.settings')
-  })
-  it('rejects malformed settings payloads instead of defaulting them', () => {
-    expect(() => parseClientMessage(JSON.stringify({ type: 'settings' }))).toThrow(WireError)
-    expect(() => parseClientMessage(JSON.stringify({ type: 'settings', settings: null }))).toThrow(WireError)
-    expect(() => parseClientMessage(JSON.stringify({ type: 'settings', settings: 'x' }))).toThrow(WireError)
-    expect(() => parseClientMessage(JSON.stringify({ type: 'settings', settings: { includeHiddenEntries: true } }))).toThrow(WireError)
-    expect(() => parseClientMessage(JSON.stringify({ type: 'settings', settings: { maxListedEntries: 5 } }))).toThrow(WireError)
-    expect(() => parseClientMessage(JSON.stringify({
-      type: 'settings',
-      settings: { includeHiddenEntries: 'true', maxListedEntries: 5 },
-    }))).toThrow(WireError)
-    expect(() => parseClientMessage(JSON.stringify({
-      type: 'settings',
-      settings: { includeHiddenEntries: true, maxListedEntries: '5' },
-    }))).toThrow(WireError)
-    // Non-finite numbers cannot survive JSON, but a direct parse must reject them.
-    expect(() => parseListingSettings({ includeHiddenEntries: true, maxListedEntries: Number.POSITIVE_INFINITY })).toThrow(WireError)
-    expect(() => parseListingSettings({ includeHiddenEntries: true, maxListedEntries: Number.NaN })).toThrow(WireError)
-  })
-  it('keeps an out-of-range but finite bound (the host clamps it)', () => {
-    expect(parseListingSettings({ includeHiddenEntries: true, maxListedEntries: 0 }))
-      .toEqual({ includeHiddenEntries: true, maxListedEntries: 0 })
-    expect(parseListingSettings({ includeHiddenEntries: false, maxListedEntries: -3 }))
-      .toEqual({ includeHiddenEntries: false, maxListedEntries: -3 })
+  it('round-trips enhanced target and frozen previous path', () => {
+    const command = { name: 'better_sidebar_open', kind: 'file', target: 'F:/资料/a.md', title: '资料' } as const
+    expect(parseHostMessage(encodeHostCommand('id', command)).command).toEqual(command)
+    expect(parseCommand({ name: 'reopen_previous_file', path: '/a.md' })).toEqual({ name: 'reopen_previous_file', path: '/a.md' })
+    expect(() => parseCommand({ ...command, kind: 'script' })).toThrow(WireError)
   })
   it('rejects malformed envelopes', () => {
     expect(() => parseClientMessage('not json')).toThrow(WireError)
@@ -140,9 +87,6 @@ describe('client → host messages', () => {
     expect(() => parseClientMessage(JSON.stringify({ type: 'hello', sessionId: '' }))).toThrow(WireError)
     expect(() => parseClientMessage(JSON.stringify({ type: 'nope' }))).toThrow(WireError)
     expect(() => parseClientMessage(JSON.stringify({ type: 'state', state: { sessionId: SID, openedFiles: 'x' } }))).toThrow(WireError)
-    // Required state fields are all valid here, so the rejection below comes
-    // from the malformed `settings` payload alone.
-    expect(() => parseClientMessage(JSON.stringify({ type: 'state', state: { sessionId: SID, sidebarVisible: true, openedFiles: [], expandedFolders: [], settings: { includeHiddenEntries: 1, maxListedEntries: 1 } } }))).toThrow(WireError)
     expect(() => parseClientMessage(JSON.stringify({ type: 'command-result', result: { id: 'x' } }))).toThrow(WireError)
   })
 })

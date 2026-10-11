@@ -4,7 +4,7 @@
  * blob, plus the per-session mirror's default behavior.
  */
 import { describe, expect, it } from 'vitest'
-import { ListingSettingsStore, resolveListingSettings } from '../../src/host/listing-settings.ts'
+import { resolveListingSettings } from '../../src/host/listing-settings.ts'
 import { LISTING_SETTINGS_DEFAULTS, MAX_LISTED_ENTRIES_MIN } from '../../src/shared/types.ts'
 
 describe('resolveListingSettings', () => {
@@ -41,34 +41,5 @@ describe('resolveListingSettings', () => {
     expect(resolveListingSettings([])).toEqual(LISTING_SETTINGS_DEFAULTS)
     expect(resolveListingSettings('nope')).toEqual(LISTING_SETTINGS_DEFAULTS)
     expect(resolveListingSettings(42)).toEqual(LISTING_SETTINGS_DEFAULTS)
-  })
-})
-
-describe('ListingSettingsStore', () => {
-  it('reports the defaults for a session that never pushed settings', () => {
-    const store = new ListingSettingsStore()
-    expect(store.get('s-unknown')).toEqual(LISTING_SETTINGS_DEFAULTS)
-  })
-  it('stores normalized per-session values', () => {
-    const store = new ListingSettingsStore()
-    store.apply('s-1', { includeHiddenEntries: false, maxListedEntries: 0 })
-    store.apply('s-2', { includeHiddenEntries: true, maxListedEntries: 7 })
-    expect(store.get('s-1')).toEqual({ includeHiddenEntries: false, maxListedEntries: MAX_LISTED_ENTRIES_MIN })
-    expect(store.get('s-2')).toEqual({ includeHiddenEntries: true, maxListedEntries: 7 })
-    expect(store.get('s-3')).toEqual(LISTING_SETTINGS_DEFAULTS)
-  })
-  it('normalizes an untrusted payload (out-of-range / malformed)', () => {
-    const store = new ListingSettingsStore()
-    store.apply('s-1', { includeHiddenEntries: 'yes', maxListedEntries: NaN })
-    expect(store.get('s-1')).toEqual({ includeHiddenEntries: false, maxListedEntries: 1000 })
-  })
-  it('clears one session and the whole mirror', () => {
-    const store = new ListingSettingsStore()
-    store.apply('s-1', { includeHiddenEntries: false, maxListedEntries: 5 })
-    store.clear('s-1')
-    expect(store.get('s-1')).toEqual(LISTING_SETTINGS_DEFAULTS)
-    store.apply('s-2', { includeHiddenEntries: false, maxListedEntries: 5 })
-    store.dispose()
-    expect(store.get('s-2')).toEqual(LISTING_SETTINGS_DEFAULTS)
   })
 })

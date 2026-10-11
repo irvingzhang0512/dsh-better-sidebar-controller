@@ -1,76 +1,52 @@
 ---
 name: sidebar-controller
 description: >-
-  通过 dsh-better-sidebar-controller 的 11 个工具控制 better-sidebar 文件工作区：
-  查看/打开/关闭侧边栏、查看文件树、展开/收起文件夹、打开/关闭/切换文件、回到上一个文件、刷新文件树。
-  当用户说「打开某文件 / 切到某文件 / 关闭当前文件 / 回到刚才那个文件 / 展开某文件夹 / 列出文件 / 打开或关闭侧边栏 / 刷新文件树 / 我现在打开的是哪个文件」等意图时使用。
+  通过 better-sidebar 增强工具打开文件、文件夹窗口与 HTTP(S) 网页，管理侧栏显隐、目录树和文件标签。
+  用户要求打开、关闭、切换、返回、列出文件、查询哪个文件或刷新文件树时使用。能力依赖 better-sidebar 与侧边卡片工具开关。
 ---
 
-# sidebar-controller — 控制 better-sidebar 文件工作区
+# sidebar-controller
 
-`sidebar-controller` 是 `dsh-better-sidebar` 的 Agent 控制层：你（Agent）通过它用自然语言
-驱动侧边栏里的文件树、文件打开/关闭/切换，以及侧边栏显隐。所有操作与用户的鼠标操作共享同一份状态
-（current_file / previous_file / 已打开文件 / 已展开文件夹），你看到的就是用户看到的。
+## 调用规则
 
-## 何时使用
 
-- 用户想**看**侧边栏/文件状态：打开的是哪个文件、有哪些文件开着、侧边栏开着吗。
-- 用户想**操作**侧边栏：打开/关闭侧边栏、列出目录、展开/收起文件夹、打开文件、关闭文件、
-  切换当前文件、回到上一个文件、刷新文件树。
+1. 先查看本轮真实可用工具，不能因技能列出了名称就假定已注册。缺 `better_sidebar_open/open_file` 时说明上游打开开关；缺查询/管理工具时说明管理开关；缺全部工具时还需核对 better-sidebar 与增强插件是否启用且兼容。不能借 shell、伪造工具或修改配置绕过工具开关。
+2. 常规打开优先 `better_sidebar_open(target, title?)`。file/folder/http(s) 自动分类，不指定 sessionId；路径不明确且管理可用时先 `list_files` 找真实工作区路径。外部绝对路径由用户提供，增强打开不改变 cwd。
+3. 文件夹窗口用增强打开，现有工作区树展开用 `expand_folder`，两者不混同。网页只支持 HTTP(S)；接受打开请求不代表网站成功加载。
+4. `open_file(path)` 保留旧兼容语义，只接受工作区内文件。不要把其 PATH_OUTSIDE_WORKSPACE 当成增强打开也禁止外部文件；目录工具仍受工作区限制。
+5. 切到已打开文件用 `activate_file`；尚未打开且打开工具可用时用增强打开。关闭用 `close_file`（不传 path 则当前文件）。工作区外文件仅在当前会话已打开清单中可关闭/切换，不能借此访问未知外部路径。
+6. “回到刚才那个文件”用 `reopen_previous_file`，需两个开关都开；使用系统上一文件指针，不自行记忆或猜路径。网页、目录窗口与其他页面不计作当前/上一文件。
+7. 状态问询优先 `get_sidebar_state`；管理关闭时不能为回答状态自行打开权限。内部工作台状态服务存在不代表模型拥有查询工具。
+8. `OK` 表示客户端确认接受操作；`QUEUED` 如实说等待对应会话界面接入，不重复投递。`QUEUE_FULL` 表示未入队；`TOOL_DISABLED/SETTINGS_UNAVAILABLE/SIDEBAR_UNAVAILABLE` 按实际 message 说明，不能说“已排队”。
+9. `BRIDGE_TIMEOUT` 表示结果未知。查询可用时先查文件状态并核对界面；查询不可用时请用户目视确认，或由用户决定开启管理，不能自动重开。网页/目录状态不在文件清单中，不能仅凭 openedFiles 中没有它判失败后重复开。
+10. 只操作调用会话。未连接的后台会话等待其正确界面；不切换前台其他会话来伪装完成。文件内容编辑、Git、搜索替换与语音不属于本技能；不把 close_file 用来关闭网页或目录窗口。
 
-## 工具清单（11 个，全部是明确的小工具）
 
-| 工具 | 作用 | 典型自然语言 |
-| --- | --- | --- |
-| `get_sidebar_state` | 获取侧边栏/工作区状态（当前文件、上一个文件、已打开文件、已展开文件夹、是否显示、工作区根目录） | “我现在打开的是哪个文件”“有哪些文件开着”“侧边栏开着吗” |
-| `show_sidebar` | 打开（显示）侧边栏 | “打开侧边栏”“把文件栏打开” |
-| `hide_sidebar` | 关闭（隐藏）侧边栏 | “把侧边栏关掉” |
-| `list_files` | 列出目录内容（单层；省略 path 则列出工作区根目录） | “看看有哪些文件”“列一下 docs 目录”“根目录有什么” |
-| `expand_folder` | 在文件树中展开文件夹 | “展开 docs”“把会议资料文件夹打开” |
-| `collapse_folder` | 在文件树中收起文件夹 | “收起 docs”“把 node_modules 收起来” |
-| `refresh_tree` | 刷新文件树（重新读取工作区根目录） | “刷新文件树”“重新看看文件” |
-| `open_file` | 打开文件（已打开则激活） | “打开今天的会议纪要”“打开 A.md” |
-| `close_file` | 关闭文件（省略 path 则关闭当前文件） | “关闭当前文件”“把 A.md 关掉” |
-| `activate_file` | 切换到已打开的文件标签页 | “切到项目计划”“切到那个文件” |
-| `reopen_previous_file` | 重新打开上一个文件 | “回到刚才那个文件”“切回上一个文件” |
+## 工具清单与自然语言示例
 
-## 自然语言 → 工具映射示例
+打开：`better_sidebar_open`、`open_file`。管理：`get_sidebar_state`、`show_sidebar`、`hide_sidebar`、`list_files`、`expand_folder`、`collapse_folder`、`refresh_tree`、`close_file`、`activate_file`。两种能力：`reopen_previous_file`。
 
-1. “帮我把 docs 文件夹展开” → `expand_folder(path: "docs")`
-2. “打开 requirements.txt 看看” → `open_file(path: "requirements.txt")`
-3. “切到项目计划.md” → 若该文件已打开用 `activate_file(path: "项目计划.md")`；未打开则 `open_file(path: "项目计划.md")`
-4. “关闭当前文件” → `close_file()`（省略 path 即当前文件）
-5. “回到刚才那个文件” → `reopen_previous_file()`
-6. “现在打开的是哪个文件？” → `get_sidebar_state()`
-7. “把侧边栏关掉” → `hide_sidebar()`
-8. “看看根目录有哪些文件” → `list_files()`
+| 对 Agent 说 | 对应工具参数 | 需要的开关 |
+|---|---|---|
+| 「用侧边栏控制技能打开 docs/会议纪要.md」 | `better_sidebar_open(target: "docs/会议纪要.md")` | 打开 |
+| 「在侧边栏打开 F:/资料/项目计划.md」 | `better_sidebar_open(target: "F:/资料/项目计划.md")` | 打开 |
+| 「把 docs 文件夹作为一个窗口打开」 | `better_sidebar_open(target: "docs")` | 打开 |
+| 「在侧边栏打开 https://example.com」 | `better_sidebar_open(target: "https://example.com")` | 打开 |
+| 「现在打开的是哪个文件？有哪些文件开着？」 | `get_sidebar_state()` | 管理 |
+| 「显示侧边栏」 | `show_sidebar()` | 管理 |
+| 「隐藏侧边栏」 | `hide_sidebar()` | 管理 |
+| 「列一下工作区根目录／docs 目录」 | `list_files()`／`list_files(path: "docs")` | 管理 |
+| 「在文件树里展开 docs」 | `expand_folder(path: "docs")` | 管理 |
+| 「收起文件树里的 docs」 | `collapse_folder(path: "docs")` | 管理 |
+| 「我刚在外部新建了文件，刷新文件树」 | `refresh_tree()` | 管理 |
+| 「关闭当前文件／把 docs/会议纪要.md 关掉」 | `close_file()`／`close_file(path: "docs/会议纪要.md")` | 管理 |
+| 「切到已经打开的 docs/项目计划.md」 | `activate_file(path: "docs/项目计划.md")` | 管理 |
+| 「回到刚才那个文件」 | `reopen_previous_file()` | 打开和管理 |
+| 「用兼容工具打开工作区内的 docs/会议纪要.md」 | `open_file(path: "docs/会议纪要.md")` | 打开 |
 
-## 关键约定（务必遵守）
 
-### 路径
-- `path` 参数支持**相对路径**（相对工作区根目录，例如 `docs/meeting.md`）或**绝对路径**。
-- 路径会被校验并限制在工作区内；工作区外会返回 `PATH_OUTSIDE_WORKSPACE`。
-- 不知道确切路径时，先用 `list_files()` 逐层查看；文件名可能是中文，尽量按用户原样使用。
+## 完整流程
 
-### 当前文件 / 上一个文件（状态自动维护，无需你记）
-- 切换文件时，`previous_file` 自动变成切换前的文件，`current_file` 变成新文件。
-- “回到刚才那个文件”直接用 `reopen_previous_file()`，不要自己拼路径。
+两个开关都开时：列出 docs → 增强打开会议纪要 → 查询状态 → 增强打开项目计划 → 切到会议纪要 → 切到项目计划 → 返回会议纪要 → 关闭当前文件 → 查询剩余文件。使用真实已存在的路径。打开侧边栏用 show_sidebar，刷新文件树用 refresh_tree。
 
-### 结果与重试
-- 工具返回统一信封 `{ ok, code, message, ... }`：
-  - `code: "OK"` — 成功。
-  - `code: "QUEUED"` — 侧边栏当前不可见，操作已排队，会在 Sidebar 可见时自动应用；可如实告诉用户。
-  - `code: "SIDEBAR_UNAVAILABLE"` — 该会话侧边栏尚未连接（多为未安装 dsh-better-sidebar 或从未打开过侧边栏），提示用户安装/打开侧边栏后重试。
-  - 其他错误码（如 `FILE_NOT_FOUND` / `NOT_A_DIRECTORY` / `NOT_A_FILE` / `FILE_NOT_OPEN` / `NO_PREVIOUS_FILE`）按 message 如实转述即可。
-- 打开文件失败（如路径不存在）时，先 `list_files()` 找对路径再重试，不要反复猜测。
-
-### 边界
-- 本 skill 只控制**文件工作区**：不编辑文件内容、不做搜索替换、不做 git 操作。
-- 不打开文件夹窗口（打开文件夹请用 `expand_folder`）。
-- 一切操作都作用于当前会话的侧边栏；切换会话后状态自动跟随。
-
-## 工作流建议
-
-1. 用户意图不明确时，先 `get_sidebar_state()` 了解当前状态（是否已打开、当前文件是什么）。
-2. 操作路径不确定时，先 `list_files()` / `expand_folder` 确认，再 `open_file` / `activate_file`。
-3. 需要“切回刚才那个文件”时，永远优先 `reopen_previous_file()`。
+具体参数和错误说明见 [使用指南](../../docs/usage.md)与[工具参考](../../docs/tools.md)。

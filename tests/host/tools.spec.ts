@@ -12,7 +12,7 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { registerControllerTools, type ControllerDeps } from '../../src/host/tools.ts'
 import { ControllerStateStore } from '../../src/host/controller-state.ts'
 import { listDirectorySafe } from '../../src/host/fs-tree.ts'
-import { ListingSettingsStore } from '../../src/host/listing-settings.ts'
+import { resolveListingSettings } from '../../src/host/listing-settings.ts'
 import { pathKind, resolveLexicalTarget, resolveWorkspaceTarget } from '../../src/host/paths.ts'
 import type { CommandAck, ControllerCommand, DispatchOutcome } from '../../src/shared/types.ts'
 
@@ -44,7 +44,7 @@ class FakeBridge {
 
 function makeHarness(bridge = new FakeBridge(), cwd: string | null = root) {
   const store = new ControllerStateStore()
-  const listingSettings = new ListingSettingsStore()
+  const listingSettings = { value: resolveListingSettings(undefined), apply(_id: string, raw: unknown) { this.value = resolveListingSettings(raw) }, get(_id: string) { return this.value } }
   const tools = new Map<string, RegisteredTool>()
   const deps: ControllerDeps = {
     getCwd: async () => cwd,
@@ -90,6 +90,7 @@ describe('registration', () => {
     const names = [...tools.keys()].sort()
     expect(names).toEqual([
       'activate_file',
+      'better_sidebar_open',
       'close_file',
       'collapse_folder',
       'expand_folder',
@@ -243,14 +244,14 @@ describe('list_files', () => {
     expect(entries).toHaveLength(1)
     expect(result.truncated).toBe(true)
   })
-  it('applies settings per session', async () => {
+  it('uses the same upstream persistent settings across sessions', async () => {
     await writeFile(join(root, '.env'), 'x')
     const harness = makeHarness()
     harness.listingSettings.apply('other-session', { includeHiddenEntries: false, maxListedEntries: 1 })
     const result = await harness.run('list_files')
     const entries = result.entries as Array<Record<string, unknown>>
-    expect(entries.map(e => e.name)).toContain('.env')
-    expect(result.truncated).toBe(false)
+    expect(entries.map(e => e.name)).not.toContain('.env')
+    expect(result.truncated).toBe(true)
   })
   it('takes effect on the NEXT call after a settings change', async () => {
     await writeFile(join(root, '.env'), 'x')
@@ -401,7 +402,7 @@ describe('reopen_previous_file', () => {
     }, root, 1)
     const result = await harness.run('reopen_previous_file')
     expect(result).toMatchObject({ ok: true, code: 'OK', path: join(root, 'a.md') })
-    expect(bridge.sent.at(-1)?.command).toEqual({ name: 'open_file', path: join(root, 'a.md') })
+    expect(bridge.sent.at(-1)?.command).toEqual({ name: 'reopen_previous_file', path: join(root, 'a.md') })
   })
   it('reports NO_PREVIOUS_FILE without one', async () => {
     const { run } = makeHarness()

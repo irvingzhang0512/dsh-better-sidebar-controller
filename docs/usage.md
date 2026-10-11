@@ -1,79 +1,90 @@
 # 使用指南（Usage）
 
-## 安装
+适用于本仓库 0.3.0 源码，目标组合 DSH desktop 0.2.0-rc.2／better-sidebar 0.25.0。验证范围见 [交付记录](VERIFICATION-0.3.0.md)，本机日常是否启用需单独核对。
 
-前置：已安装 [DSH](https://github.com/omdsh-dev/DSH)（本插件面向 0.1.2-rc.1+）与
-[dsh-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) v0.18+。
+## 增强版如何通过 Agent 使用
 
-```bash
-# 一条命令装完：插件 + 它自带的 SKILL（host 端会自动注册到技能中心，无需手动复制）
-dsh plugin --profile web add dsh-better-sidebar-controller@latest
-```
+### 先准备环境和开关
 
-重启 DSH 后即可使用；Agent 的技能目录里会自动出现 `sidebar-controller`。
-卸载（技能随插件一起移除）：
+目标环境：DSH desktop 内置 DSH `0.2.0-rc.2`、已启用且兼容的 `dsh-better-sidebar@0.25.0`，以及 `dsh-better-sidebar-controller`。本机目前自研插件停用的事实不能因本指南而视作已安装／已启用；安装与验证完成由交付记录另行说明。本指南使用 desktop，不恢复旧 web 环境。
 
-```bash
-dsh plugin --profile web remove dsh-better-sidebar-controller
-```
+启用步骤：
 
-> **旧版 DSH 兜底**：若运行环境没有 `ctx.skills`（0.1.2-rc.1 之前的版本），技能不会
-> 自动注册，请手动把 `skills/sidebar-controller/SKILL.md` 复制到
-> `<dshHome>/profiles/web/.dsh/skills/sidebar-controller/SKILL.md`。
+1. 打开 desktop 的「设置 → 侧边卡片」。
+2. 在「常规」开启「为模型注入侧边栏打开工具」。它同时允许上游 `sidebar_open`、增强 `better_sidebar_open` 和兼容 `open_file`；未设置时关闭。
+3. 找到「Sidebar Controller 增强控制」卡片，点击「功能设置」，开启「允许模型管理侧边栏」（默认关闭）。它允许查询状态、管理文件标签、控制侧边栏和目录树；返回上一文件需要这项和上面的打开开关都开启。
+4. 按需调整「列出隐藏项」（有效默认开启）及「列表上限」（有效默认 1000）；它们只控制目录工具，不改变可打开的文件范围。管理关闭时这两行隐藏，原有值不会删除。
+5. 在当前会话对 Agent 说：「请使用 sidebar-controller 技能，先检查当前可用的侧边栏工具，再告诉我哪些能力已开启。」
 
-> better-sidebar 是**软依赖**：未安装时本插件的主机端照常工作，但会话侧边栏无法连接，
-> 写操作会返回 `QUEUED`，`get_sidebar_state` 返回 `SIDEBAR_UNAVAILABLE`。
+技能由插件自动注册，无需手动复制。技能可见不表示模型已经获得全部工具：如果 Agent 找不到技能，先核对增强插件和依赖是否真正启用；如果技能可见但某工具不在当前可用工具列表中，先看对应开关，不要让 Agent 凭空执行工具名称。设置变化会自动同步工具，执行前还会重新核对权限；已有会话若没有更新可用工具列表，待设置同步后开启新一轮对话或新会话核对。
 
-## 自然语言示例（Agent 自动映射为工具调用）
+工具开关关闭不会关闭讨论工作台使用的内部文件状态服务。better-sidebar 缺失、停用或不兼容时，模型工具不提供，操作也不会排队等待一个不存在的依赖。
 
-| 你说 | 工具调用 |
-| --- | --- |
-| “现在打开的是哪个文件？” | `get_sidebar_state()` |
-| “有哪些文件开着？” | `get_sidebar_state()` |
-| “打开侧边栏 / 把文件栏打开” | `show_sidebar()` |
-| “把侧边栏关掉” | `hide_sidebar()` |
-| “看看根目录有哪些文件” | `list_files()` |
-| “列一下 docs 目录” | `list_files(path: "docs")` |
-| “展开 docs” | `expand_folder(path: "docs")` |
-| “把 node_modules 收起来” | `collapse_folder(path: "node_modules")` |
-| “刷新文件树” | `refresh_tree()` |
-| “打开今天的会议纪要” | `open_file(path: "meeting.md")` |
-| “关闭当前文件” | `close_file()` |
-| “把 A.md 关掉” | `close_file(path: "A.md")` |
-| “切到项目计划” | `activate_file(path: "项目计划.md")`（未打开则 `open_file`） |
-| “回到刚才那个文件” | `reopen_previous_file()` |
+### 直接用自然语言发出指令
 
-## 状态行为说明
+用户不需要输入工具代码，也不需要自己提供 sessionId。下面的“工具”列用于了解或排查 Agent 应如何调用。
 
-- **current_file / previous_file**：由系统自动维护。例如 会议纪要 → 项目计划 → 源码 →
-  回到会议纪要，`previous_file` 始终是「切换之前的那个文件」。`reopen_previous_file`
-  永远用系统记录的上一个文件，不要自行拼路径。
-- **current_file 为 null**：当前没有选中的文件（例如焦点在终端标签页上）。
-- **鼠标与 Agent 同步**：你在侧边栏里用鼠标打开/切换文件，Agent 的 `get_sidebar_state`
-  立刻能看到；Agent 通过工具打开/切换文件，侧边栏 UI 同步变化。同一份状态，双向一致。
+| 对 Agent 说 | 对应工具参数 | 需要的开关 |
+|---|---|---|
+| 「用侧边栏控制技能打开 docs/会议纪要.md」 | `better_sidebar_open(target: "docs/会议纪要.md")` | 打开 |
+| 「在侧边栏打开 F:/资料/项目计划.md」 | `better_sidebar_open(target: "F:/资料/项目计划.md")` | 打开 |
+| 「把 docs 文件夹作为一个窗口打开」 | `better_sidebar_open(target: "docs")` | 打开 |
+| 「在侧边栏打开 https://example.com」 | `better_sidebar_open(target: "https://example.com")` | 打开 |
+| 「现在打开的是哪个文件？有哪些文件开着？」 | `get_sidebar_state()` | 管理 |
+| 「显示侧边栏」 | `show_sidebar()` | 管理 |
+| 「隐藏侧边栏」 | `hide_sidebar()` | 管理 |
+| 「列一下工作区根目录／docs 目录」 | `list_files()`／`list_files(path: "docs")` | 管理 |
+| 「在文件树里展开 docs」 | `expand_folder(path: "docs")` | 管理 |
+| 「收起文件树里的 docs」 | `collapse_folder(path: "docs")` | 管理 |
+| 「我刚在外部新建了文件，刷新文件树」 | `refresh_tree()` | 管理 |
+| 「关闭当前文件／把 docs/会议纪要.md 关掉」 | `close_file()`／`close_file(path: "docs/会议纪要.md")` | 管理 |
+| 「切到已经打开的 docs/项目计划.md」 | `activate_file(path: "docs/项目计划.md")` | 管理 |
+| 「回到刚才那个文件」 | `reopen_previous_file()` | 打开和管理 |
+| 「用兼容工具打开工作区内的 docs/会议纪要.md」 | `open_file(path: "docs/会议纪要.md")` | 打开 |
 
-## 边界与限制（当前版本）
+共 12 个工具；`show_sidebar/hide_sidebar`、`expand_folder/collapse_folder` 在表中分别列出。一般打开优先选择 `better_sidebar_open`；`open_file` 用于保留旧调用兼容。上游 `sidebar_open` 可以同时存在，由上游管理注册，不需要卸载或改写它。
 
-1. **显隐 / 展开 / 收起作用于当前可见的侧边栏**：`panelOpen` 与 `expanded` 是活动会话的
-   单份状态；跨会话的「打开/关闭/激活文件」不受影响（通过 service scope 支持）。
-2. **anchor 标签**：控制器会短暂创建内部 anchor 以捕获 store，捕获完成后立即移除；它不会常驻侧边栏标签条。
-   这是接入 better-sidebar 公开 API 的最小侵入方案，不影响任何功能；上游支持
-   `setExpanded` 后即可移除（见 docs/architecture.md 决策 D1）。
-3. **本插件不做**：文件内容编辑、搜索、git 操作、Structured Document 节点操作、语音输入。
-4. **刷新时机**：外部（如命令行）新建文件后，用 `refresh_tree()` 刷新文件树。
-5. **相对路径**始终相对**当前会话的工作区根目录**，而不是 DSH 进程目录。
+**打开文件夹窗口**是在侧边栏打开以该文件夹为根的浏览窗口；**展开目录**是在现有工作区文件树里展开一层。两者不是同一个动作，也不会因为打开文件夹窗口就改变会话工作目录。
 
-## 常见问题
+### 完整操作流程示例
 
-**Q：工具返回 `QUEUED` 是什么意思？**
-A：该会话的侧边栏当前不可见（未打开或未连接）。命令已排队，侧边栏下次可见时自动生效；
-无需重试。
+先启用两个开关，使用已有且可读的 `docs/会议纪要.md`、`docs/项目计划.md`。没有这两个文件时，让 Agent 从实际目录中选择两个已有文件，不为了验收本指南创建或覆盖文件。
 
-**Q：`SIDEBAR_UNAVAILABLE`？**
-A：该会话从未连接过侧边栏。请确认已安装 dsh-better-sidebar、打开过侧边栏，再试。
+1. 对 Agent 说：「使用 sidebar-controller，列一下 docs 的文件，确认会议纪要和项目计划的路径。」调用 `list_files(path: "docs")`。
+2. 说：「在侧边栏打开会议纪要。」Agent 使用列举到的真实路径调用 `better_sidebar_open`，收到客户端确认后报告已接受打开操作。
+3. 说：「现在打开的是哪个文件？」调用 `get_sidebar_state()`，`currentFile` 应为会议纪要的绝对路径。
+4. 说：「打开项目计划，再切回会议纪要，然后切到已经打开的项目计划。」打开用 `better_sidebar_open`，后续切换用 `activate_file`；最后 currentFile 为项目计划，previousFile 为会议纪要。
+5. 说：「回到刚才那个文件。」调用 `reopen_previous_file()`，返回会议纪要。
+6. 说：「关闭当前文件，再告诉我还有哪些文件开着。」依次调用 `close_file()` 和 `get_sidebar_state()`；会议纪要从 openedFiles 中移除，不要求关闭后 currentFile 必定为空，上游可能激活其他文件。
 
-**Q：`activate_file` 提示 `FILE_NOT_OPEN`？**
-A：文件尚未打开，先用 `open_file` 打开，或直接 `open_file`（已打开会自动激活）。
+你也可以用鼠标打开、切换或关闭这些文件，再让 Agent 查询状态。原生侧栏及底部工作台的文件都应能被识别；网页、目录窗口、终端等页面不作为当前文件或文档候选。状态按会话隔离：不要在一个会话下要求 Agent 声称操作了另一个会话。
 
-**Q：路径报 `PATH_OUTSIDE_WORKSPACE`？**
-A：路径超出了会话工作区，无法访问；请改用工作区内的路径。
+### 路径、标题与外部文件
+
+- 相对路径相对于调用会话的工作目录，不是 desktop 可执行文件目录。
+- 增强入口支持工作区外的绝对路径和合法符号链接的真实目标；旧 `open_file` 与目录工具仍限制在工作区内，越界会返回 `PATH_OUTSIDE_WORKSPACE`。
+- 外部路径由用户提供；工作区里的未知路径可先 `list_files` 查找。打开外部目录不会让 `list_files` 获得该目录的列举权限。
+- 已打开的外部文件可以查询、关闭和切换；返回上一文件使用系统记录，不需要 Agent 自己记路径，也不能借此访问任意未知外部文件。
+- `title` 可作为建议标题传给上游；实际页面标题按上游公开接口支持显示，不承诺额外改名。
+- HTTP(S) 网页使用 DSH 原生浏览器。某网站拒绝 iframe 嵌入、登录限制或网络失败时，打开标签不能保证网页可读；Agent 应按界面实际情况说明。
+
+### 结果说明与排查
+
+| 情况 | 含义及下一步 |
+|---|---|
+| 找不到某个工具 | 核对依赖与开关；技能不是绕过开关的入口，不以 shell 或其他工具伪装调用 |
+| `OK` | 客户端已确认接受对应操作；网页仍可能加载失败 |
+| `QUEUED` | 有效依赖和权限均满足，但该会话界面暂未连接；等对应会话界面接入，不重复发同一指令 |
+| `QUEUE_FULL` | 当前会话已有 64 条等待指令，新指令未入队；等待队列执行后再决定是否发起 |
+| `TOOL_DISABLED` | 调用期间开关被关闭；开启对应能力后再发新指令，旧未执行指令已清理 |
+| `SIDEBAR_UNAVAILABLE` | 依赖／界面或目标页面能力不可用；按 message 核对启用、兼容版本和原生侧栏，不能当作已排队 |
+| `SETTINGS_UNAVAILABLE` | 无法取得权威设置；恢复上游设置读取，不以默认开启或客户端缓存继续执行 |
+| `BRIDGE_TIMEOUT` | 4 秒内没有确认，结果未知，操作可能已经发生；管理开关开启时先查询状态并核对界面，不盲目重复打开。管理关闭时先目视确认，或自行开启管理再查询 |
+| `FILE_NOT_FOUND`／不可读路径 | 核对真实路径和文件访问状态；工作区可先列目录，不反复猜路径 |
+| `PATH_OUTSIDE_WORKSPACE` | 使用了受工作区限制的兼容/目录工具；打开外部内容用增强入口，不扩大目录权限 |
+| `FILE_NOT_OPEN`／`NO_CURRENT_FILE`／`NO_PREVIOUS_FILE` | 分别表示文件未打开、无当前文件、无上一文件；按状态处理，不伪造文件指针 |
+| `INVALID_TARGET` | 目标或协议非法；网页只用 HTTP(S)，本地文件用普通路径，不能使用 file: 或 javascript: |
+
+关闭打开或管理能力只清理相应尚未执行的操作，不关闭已经打开的标签。已发送但未确认的操作不会在重连后自动重复；仅尚未发送的队列会重放。
+
+本扩展不编辑文件内容、不做搜索替换或 Git 操作，也不新增网页／目录窗口关闭工具。Agent 调用这组工具只是在现有界面中打开与管理内容。

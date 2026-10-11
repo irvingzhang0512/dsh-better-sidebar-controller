@@ -7,7 +7,7 @@
  * may import Node or browser runtime APIs.
  */
 /** Stable status / error codes returned inside tool results. */
-export type ControllerCode = 'OK' | 'QUEUED' | 'BRIDGE_NOT_CONNECTED' | 'BRIDGE_TIMEOUT' | 'SIDEBAR_UNAVAILABLE' | 'NO_AGENT' | 'NO_SESSION' | 'INVALID_PATH' | 'PATH_OUTSIDE_WORKSPACE' | 'FILE_NOT_FOUND' | 'FS_ERROR' | 'NOT_A_DIRECTORY' | 'NOT_A_FILE' | 'FILE_NOT_OPEN' | 'NO_CURRENT_FILE' | 'NO_PREVIOUS_FILE' | 'UNKNOWN_COMMAND' | 'INTERNAL_ERROR';
+export type ControllerCode = 'OK' | 'QUEUED' | 'BRIDGE_NOT_CONNECTED' | 'BRIDGE_TIMEOUT' | 'SIDEBAR_UNAVAILABLE' | 'NO_AGENT' | 'NO_SESSION' | 'INVALID_PATH' | 'PATH_OUTSIDE_WORKSPACE' | 'FILE_NOT_FOUND' | 'FS_ERROR' | 'NOT_A_DIRECTORY' | 'NOT_A_FILE' | 'FILE_NOT_OPEN' | 'NO_CURRENT_FILE' | 'NO_PREVIOUS_FILE' | 'UNKNOWN_COMMAND' | 'INTERNAL_ERROR' | 'TOOL_DISABLED' | 'SETTINGS_UNAVAILABLE' | 'QUEUE_FULL' | 'INVALID_TARGET';
 /**
  * The per-session controller state mirror (what `get_sidebar_state` reports
  * and what every natural-language operation leans on).
@@ -41,10 +41,8 @@ export interface ControllerState {
  *
  * They are better-sidebar USER settings (global, stored in its own prefs
  * document under `pluginSettings['dsh-better-sidebar-controller:anchor']`),
- * but the listing itself runs on the host half — so the client half reads
- * them through the public service snapshot and mirrors them over the bridge.
- * Every transport field is OPTIONAL on the wire (an old client simply omits
- * them) and the host falls back to {@link LISTING_SETTINGS_DEFAULTS}.
+ * and the host reads that same persistent namespace directly. They no
+ * longer travel over the client bridge. Missing values use the defaults.
  */
 export interface ListingSettings {
     /** Whether dot-prefixed (hidden) entries are returned; they keep `hidden: true`. */
@@ -67,8 +65,6 @@ export interface SidebarStateWire {
     openedFiles: string[];
     expandedFolders: string[];
     updatedAt: number;
-    /** SPEC F009 listing settings; absent when the client declares none. */
-    settings?: ListingSettings;
 }
 /**
  * One command the host sends to the client. Every command is small and
@@ -76,6 +72,11 @@ export interface SidebarStateWire {
  * tool.
  */
 export type ControllerCommand = {
+    name: 'better_sidebar_open';
+    kind: 'file' | 'folder' | 'url';
+    target: string;
+    title: string;
+} | {
     name: 'show_sidebar';
 } | {
     name: 'hide_sidebar';
@@ -99,6 +100,7 @@ export type ControllerCommand = {
     path: string;
 } | {
     name: 'reopen_previous_file';
+    path?: string;
 }
 /** Internal: ask the client to re-push its current state (used by
  *  `get_sidebar_state` to force a fresh mirror before answering). */
@@ -107,7 +109,7 @@ export type ControllerCommand = {
 };
 /** Every command name (kept in sync with the union above; used for
  *  validation and for SKILL/docs contract tests). */
-export declare const CONTROLLER_COMMAND_NAMES: readonly ["show_sidebar", "hide_sidebar", "expand_folder", "collapse_folder", "refresh_tree", "open_file", "close_file", "activate_file", "reopen_previous_file", "sync_state"];
+export declare const CONTROLLER_COMMAND_NAMES: readonly ["better_sidebar_open", "show_sidebar", "hide_sidebar", "expand_folder", "collapse_folder", "refresh_tree", "open_file", "close_file", "activate_file", "reopen_previous_file", "sync_state"];
 /** Acknowledgment the client returns for exactly one dispatched command. */
 export interface CommandAck {
     /** The command id this ack answers. */
@@ -125,11 +127,6 @@ export type ClientToHostMessage = {
 } | {
     type: 'state';
     state: SidebarStateWire;
-}
-/** One settings-only push (SPEC F009): both fields always travel together. */
- | {
-    type: 'settings';
-    settings: ListingSettings;
 } | {
     type: 'command-result';
     result: CommandAck;
@@ -151,6 +148,11 @@ export type HostToClientMessage = {
  *   not arrive within the wait budget).
  */
 export interface DispatchOutcome {
+    error?: {
+        ok: false;
+        code: ControllerCode;
+        message: string;
+    };
     delivered: boolean;
     queued: boolean;
     ack: CommandAck | null;

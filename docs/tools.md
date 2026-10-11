@@ -1,105 +1,75 @@
 # 工具参考（Tools）
 
-本插件提供 **11 个明确的小工具**（刻意不做万能 `workspace(action)` 工具）。每个工具返回
-统一信封，结构如下：
+## 增强版目标工具契约
 
-```jsonc
+文档版：`sidebar-enhancement-20261011-v1`，用户已确认。对应 [SPEC F010–F013](SPEC.md#本次增强文档版与适用范围)及 [架构](architecture.md#增强控制层目标契约)。本版工具在 0.3.0 实施；验证见 [交付记录](VERIFICATION-0.3.0.md)。普通用户的 Agent 指令示例见 [使用指南](usage.md#增强版如何通过-agent-使用)。
+
+### 注册与参数
+
+| 工具 | 参数 | 门禁 | 路径/内容范围 |
+|---|---|---|---|
+| `better_sidebar_open` | `target: string` 必填，`title?: string` | 上游打开 | 文件、目录或 HTTP(S) 网页；允许外部绝对路径 |
+| `open_file` | `path: string` 必填 | 上游打开 | 兼容文件打开，限工作区；旧参数/输出不改 |
+| `get_sidebar_state` | 无 | 管理 | 调用会话文件状态，不把网页/目录计为文件 |
+| `show_sidebar` | 无 | 管理 | 显示调用会话侧栏 |
+| `hide_sidebar` | 无 | 管理 | 隐藏调用会话侧栏 |
+| `list_files` | `path?: string` | 管理 | 工作区内单层目录；省略为会话工作区 |
+| `expand_folder` | `path: string` 必填 | 管理 | 工作区内目录树展开 |
+| `collapse_folder` | `path: string` 必填 | 管理 | 工作区内目录树折叠 |
+| `refresh_tree` | 无 | 管理 | 刷新工作区树并返回根目录列举 |
+| `close_file` | `path?: string` | 管理 | 已打开文件；省略为当前文件；支持已知外部文件 |
+| `activate_file` | `path: string` 必填 | 管理 | 已打开文件；支持已知外部文件 |
+| `reopen_previous_file` | 无 | 打开且管理 | 该会话系统记录的上一真实文件，重新检查可访问 |
+
+所有相对路径按调用会话 cwd 解析，sessionId 从调用 Agent 取得、不接受模型指定。上游开关是 `agentOpenTools`，管理开关是 `pluginSettings['dsh-better-sidebar-controller:anchor'].agentControlTools`；默认均关闭（上游既有明确值保留）。依赖不可用或设置尚未读取时不注册本插件工具；只开启打开时 2 个，只开启管理时 9 个，两者开启时 12 个。上游自己的 `sidebar_open` 不计入数量。
+
+### 增强打开输出
+
+全部输出保持 `{ ok, code, message, ... }`。target 分类完成后增加 `kind: 'file'|'folder'|'url'`、`target`（规范化路径或验证过的 URL）、`title`（提交给上游的建议标题）、`delivered:boolean`、`queued:boolean`；分类前失败只有可确定的字段，不能伪造 kind/target。标题遵循上游支持，不承诺本工具额外修改 UI 默认标题。
+
+```json
 {
-  "ok": true,             // 是否成功
-  "code": "OK",           // 状态 / 错误码（见下表）
-  "message": "文件已打开。", // 人类可读说明
-  // ...工具专属字段
+  "ok": true,
+  "code": "OK",
+  "message": "客户端已确认接受文件打开操作。",
+  "kind": "file",
+  "target": "F:/资料/项目计划.md",
+  "title": "项目计划.md",
+  "delivered": true,
+  "queued": false
 }
 ```
 
-所有 `path` 参数：相对路径按会话工作区根目录（cwd）解析，也接受绝对路径；路径会被
-规范化并限制在工作区内。
+客户端未接入且允许排队时 `QUEUED/ok:true/delivered:false/queued:true`；未在 4 秒内确认时 `BRIDGE_TIMEOUT/ok:false/delivered:true/queued:false`；队列满时 `QUEUE_FULL/ok:false/delivered:false/queued:false`。发送成功不是操作成功，网页打开接受也不是网页加载成功。
 
-## 工具清单
+`get_sidebar_state` 与旧工具输出继续采用现有字段，`sidebarController` 的服务接口形状不改；变化在真实 native/底部文件来源与外部已知文件可控制。目录列表配置由宿主权威上游设置读取，无浏览器连接也不能退回错误默认值。
 
-### 1. `get_sidebar_state`
-- 参数：无。
-- 返回：`connected`、`state`（`sidebarVisible` / `currentFile` / `previousFile` /
-  `openedFiles` / `expandedFolders` / `workspaceRoot` / `updatedAt`；无值字段省略；
-  未连接时 `state` 为 `null`）。
-- 说明：回答「我现在打开的是哪个文件」「有哪些文件开着」「侧边栏开着吗」等状态类问题。
-  客户端已连接时会先强制同步一次最新状态再回答。
+### 新增和更新的失败含义
 
-### 2. `show_sidebar`
-- 参数：无。返回：`sidebarVisible: true`。
-- 说明：打开（显示）better-sidebar 侧边栏。
+| code | 含义 |
+|---|---|
+| `TOOL_DISABLED` | 注册后执行期间权限关闭；不执行、不排队 |
+| `SETTINGS_UNAVAILABLE` | 权威上游设置无法读取；不默认开启 |
+| `SIDEBAR_UNAVAILABLE` | 依赖/目标界面能力不可用；区别于依赖有效但目标客户端暂未连接 |
+| `QUEUE_FULL` | 64 条上限已满，新命令未接受 |
+| `INVALID_TARGET` | 目标为空/协议非法等分类错误，Windows 盘符不会误判为协议 |
+| `BRIDGE_TIMEOUT` | 未获得执行确认，先查询/核对状态，不自动重复打开 |
 
-### 3. `hide_sidebar`
-- 参数：无。返回：`sidebarVisible: false`。
-- 说明：隐藏（关闭）侧边栏。
+保留旧路径和状态错误码。普通业务失败返回结构化结果与一致的文本投影。关闭能力清理该类未执行队列，不回滚已执行操作；状态内部同步不受模型开关影响。更多门禁、协议及迁移细节以架构目标契约为准。
 
-### 4. `list_files`
-- 参数：`path?`（要列出的目录，相对或绝对；省略 = 工作区根目录）。
-- 返回：`path`、`entries[]`（`name` / `path` / `isDir` / `hidden` / `isSymlink` /
-  `broken`）、`truncated`。
-- 说明：单层列举；目录优先、大小写不敏感排序；隐藏文件带 `hidden: true`。行为受侧边卡片设置
-  `includeHiddenEntries`／`maxListedEntries` 影响（先过滤隐藏项、再按上限截断，隐藏项不占用行数
-  配额；默认返回隐藏项、上限 1000；见 [SPEC.md](SPEC.md) 的 F009）。
+## 其他工具输出
 
-### 5. `expand_folder`
-- 参数：`path`（文件夹路径，相对或绝对）。
-- 返回：`path`、`expanded: true`、`delivered` / `queued`。
-- 说明：在文件树中展开文件夹；目标必须是目录，否则 `NOT_A_DIRECTORY`。
+| 工具 | 专属结果字段 |
+|---|---|
+| get_sidebar_state | connected、state（无连接时 null）；state 含 sidebarVisible、currentFile、previousFile、openedFiles、expandedFolders、workspaceRoot、fileCandidate、fileCandidateSource、updatedAt |
+| show_sidebar / hide_sidebar | sidebarVisible、delivered、queued |
+| list_files | path、entries（name/path/isDir/hidden/isSymlink/broken）、truncated |
+| expand_folder / collapse_folder | path、expanded、delivered、queued |
+| refresh_tree | rootPath、entries、truncated、delivered、queued |
+| open_file / close_file / activate_file / reopen_previous_file | path、delivered、queued |
 
-### 6. `collapse_folder`
-- 参数：`path`。返回：`path`、`expanded: false`、`delivered` / `queued`。
-- 说明：收起文件夹。
+列举为单层，目录优先且按名称排序；先过滤隐藏项，再按上限截断。显隐／文件／目录操作只有客户端确认才返回 OK。状态字段中的空文件指针用 null，不能用网页或目录伪造。
 
-### 7. `refresh_tree`
-- 参数：无。返回：`rootPath`、`entries[]`、`truncated`、`delivered` / `queued`。
-- 说明：刷新文件树（重新读取工作区根目录，并让 Sidebar 重载已展开目录）。返回的根目录条目与
-  `list_files` 共用同一套侧边卡片设置 `includeHiddenEntries`／`maxListedEntries`（先过滤隐藏项、
-  再按上限截断；默认返回隐藏项、上限 1000；见 [SPEC.md](SPEC.md) 的 F009）。
+## 保留的路径与状态错误
 
-### 8. `open_file`
-- 参数：`path`（文件路径，相对或绝对）。
-- 返回：`path`、`delivered` / `queued`。
-- 说明：打开文件；**已打开则自动激活**。目标必须是文件，否则 `NOT_A_FILE`。
-
-### 9. `close_file`
-- 参数：`path?`（省略 = 关闭当前文件）。
-- 返回：`path`、`delivered` / `queued`。
-- 说明：关闭文件标签页；文件必须已打开，否则 `FILE_NOT_OPEN`（省略 path 且无当前文件时
-  返回 `NO_CURRENT_FILE`）。
-
-### 10. `activate_file`
-- 参数：`path`。返回：`path`、`delivered` / `queued`。
-- 说明：切换到（激活）**已打开**的文件标签页；未打开请先 `open_file`。
-
-### 11. `reopen_previous_file`
-- 参数：无。返回：`path`、`delivered` / `queued`。
-- 说明：重新打开上一个文件（`previous_file`）。没有上一文件时返回 `NO_PREVIOUS_FILE`。
-
-## 错误码表
-
-| code | 含义 | 模型话术建议 |
-| --- | --- | --- |
-| `OK` | 成功 | — |
-| `QUEUED` | 侧边栏当前不可见，操作已排队，可见时自动应用 | “侧边栏还没打开，操作已排队，稍后会生效。” |
-| `BRIDGE_NOT_CONNECTED` | 桥未连接（保留码） | — |
-| `BRIDGE_TIMEOUT` | 客户端未在 4s 内确认 | “侧边栏没有响应，请确认侧边栏已打开后重试。” |
-| `SIDEBAR_UNAVAILABLE` | 该会话侧边栏尚未连接（多为未安装 better-sidebar 或从未打开过侧边栏） | “需要先打开侧边栏（或安装 dsh-better-sidebar）。” |
-| `NO_AGENT` | 无法确定调用会话 | — |
-| `NO_SESSION` | 无法确定会话工作目录 | — |
-| `INVALID_PATH` | 路径无法解析或为空 | — |
-| `PATH_OUTSIDE_WORKSPACE` | 路径在工作区之外 | “该路径在工作区之外，无法访问。” |
-| `FILE_NOT_FOUND` | 路径不存在 | “先列一下目录确认路径。” |
-| `FS_ERROR` | 文件系统读取失败 | — |
-| `NOT_A_DIRECTORY` | 目标不是目录 | “这是一个文件，不是文件夹。” |
-| `NOT_A_FILE` | 目标不是文件（是文件夹） | “这是文件夹，请用展开文件夹。” |
-| `FILE_NOT_OPEN` | 文件未打开 | “该文件还没打开，先打开它。” |
-| `NO_CURRENT_FILE` | 没有当前文件 | — |
-| `NO_PREVIOUS_FILE` | 没有上一个文件 | — |
-| `UNKNOWN_COMMAND` | 未知命令（保留码） | — |
-| `INTERNAL_ERROR` | 内部错误 | — |
-
-## 返回说明
-
-- `delivered: true` 表示命令已送达 Sidebar 客户端；`queued: true` 表示已排队等待重放。
-- 打开/关闭/激活/展开/收起/显隐/刷新 这 8 个写操作都带有投递状态，方便模型判断“是否已生效”。
-- 所有结果同时有一个纯文本 render 投影（供 UI 展示），结构化 JSON 才是权威结果。
+NO_AGENT（无法确定调用会话）、NO_SESSION（无工作目录）、INVALID_PATH、PATH_OUTSIDE_WORKSPACE、FILE_NOT_FOUND、FS_ERROR、NOT_A_DIRECTORY、NOT_A_FILE、FILE_NOT_OPEN、NO_CURRENT_FILE、NO_PREVIOUS_FILE、INTERNAL_ERROR；BRIDGE_NOT_CONNECTED 与 UNKNOWN_COMMAND 保留于协议。具体用户处理方式见 [使用指南](usage.md#结果说明与排查)。

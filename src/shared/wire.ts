@@ -10,7 +10,6 @@ import type {
   ControllerCommand,
   ControllerCode,
   HostToClientMessage,
-  ListingSettings,
   SidebarStateWire,
 } from './types.ts'
 import { CONTROLLER_COMMAND_NAMES } from './types.ts'
@@ -39,30 +38,6 @@ function requireBool(record: Record<string, unknown>, key: string): boolean {
   return value
 }
 
-/** Require a finite number (NaN / Infinity / strings are rejected). */
-function requireNumber(record: Record<string, unknown>, key: string): number {
-  const value = record[key]
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new WireError(`missing or invalid "${key}"`)
-  }
-  return value
-}
-
-/**
- * Decode the SPEC F009 listing settings. Both fields are required in the
- * payload (they always travel together) and validated defensively: the
- * bridge drops a malformed settings message instead of letting a broken
- * value reach a listing. Range clamping is the HOST's job (`resolveListingSettings`),
- * so an out-of-range-but-finite number is accepted here.
- */
-export function parseListingSettings(raw: unknown): ListingSettings {
-  if (!isRecord(raw)) throw new WireError('invalid settings payload')
-  return {
-    includeHiddenEntries: requireBool(raw, 'includeHiddenEntries'),
-    maxListedEntries: requireNumber(raw, 'maxListedEntries'),
-  }
-}
-
 /** Validate one command name + payload (the shape of {@link ControllerCommand}). */
 export function parseCommand(raw: unknown): ControllerCommand {
   if (!isRecord(raw) || typeof raw.name !== 'string') throw new WireError('invalid command')
@@ -71,12 +46,17 @@ export function parseCommand(raw: unknown): ControllerCommand {
     throw new WireError(`unknown command "${name}"`)
   }
   switch (name) {
+    case 'better_sidebar_open': {
+      if (raw.kind !== 'file' && raw.kind !== 'folder' && raw.kind !== 'url') throw new WireError('invalid target kind')
+      return { name, kind: raw.kind, target: requireString(raw, 'target'), title: requireString(raw, 'title') }
+    }
     case 'show_sidebar':
     case 'hide_sidebar':
     case 'refresh_tree':
-    case 'reopen_previous_file':
     case 'sync_state':
       return { name }
+    case 'reopen_previous_file':
+      return { name, ...(typeof raw.path === 'string' ? { path: raw.path } : {}) }
     case 'expand_folder':
     case 'collapse_folder':
     case 'open_file':
@@ -126,14 +106,9 @@ export function parseClientMessage(text: string): ClientToHostMessage {
         openedFiles: stringArray(state.openedFiles, 'openedFiles'),
         expandedFolders: stringArray(state.expandedFolders, 'expandedFolders'),
         updatedAt: typeof state.updatedAt === 'number' && Number.isFinite(state.updatedAt) ? state.updatedAt : 0,
-        // SPEC F009: settings ride along when the client has them; a state
-        // push without them leaves the host's last known values untouched.
-        ...(Object.prototype.hasOwnProperty.call(state, 'settings') ? { settings: parseListingSettings(state.settings) } : {}),
       }
       return { type: 'state', state: wire }
     }
-    case 'settings':
-      return { type: 'settings', settings: parseListingSettings(parsed.settings) }
     case 'command-result': {
       const result = parsed.result
       if (!isRecord(result)) throw new WireError('invalid command-result payload')
@@ -183,9 +158,6 @@ export function encodeClientState(state: SidebarStateWire): string {
 }
 
 /** Encode one client→host listing-settings push (SPEC F009). */
-export function encodeClientSettings(settings: ListingSettings): string {
-  return JSON.stringify({ type: 'settings', settings })
-}
 
 /** Encode one client→host acknowledgment. */
 export function encodeAck(result: CommandAck): string {
@@ -198,6 +170,10 @@ export function isKnownCode(code: string): code is ControllerCode {
 }
 
 const KNOWN_CODES: Record<string, true> = {
+  TOOL_DISABLED: true,
+  SETTINGS_UNAVAILABLE: true,
+  QUEUE_FULL: true,
+  INVALID_TARGET: true,
   OK: true,
   QUEUED: true,
   BRIDGE_NOT_CONNECTED: true,

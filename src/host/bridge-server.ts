@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto'
 import type { ClientToHostMessage, CommandAck, ControllerCommand, DispatchOutcome, SidebarStateWire } from '../shared/types.ts'
 import { ControllerStateStore } from './controller-state.ts'
-import { ListingSettingsStore } from './listing-settings.ts'
+import type { ControllerCode } from '../shared/types.ts'
 
 /** How long a dispatched command waits for the client's ack by default. */
 export const BRIDGE_ACK_TIMEOUT_MS = 4000
@@ -23,12 +23,8 @@ export type Sender = (message: string) => void
 export interface BridgeOptions {
   /** The state mirror the client pushes into. */
   store: ControllerStateStore
-  /**
-   * The per-session side-card listing-settings mirror (SPEC F009). Optional:
-   * the bridge owns one when not supplied, so a host that only reads the
-   * defaults still works.
-   */
-  listingSettings?: ListingSettingsStore
+  /** Re-read the authoritative dependency and capability gates before delivery. */
+  authorize?: (name: string) => { ok: false; code: ControllerCode; message: string } | undefined
   /** Resolve a session's workspace root (its cwd). */
   resolveWorkspaceRoot: (sessionId: string) => Promise<string | null>
   /** Optional clock injection for tests. */
@@ -37,15 +33,13 @@ export interface BridgeOptions {
 
 export class BridgeServer {
   readonly store: ControllerStateStore
-  readonly listingSettings: ListingSettingsStore
   private sockets = new Map<string, Set<Sender>>()
   private queues = new Map<string, Array<{ id: string; command: ControllerCommand }>>()
-  private pending = new Map<string, { resolve: (ack: CommandAck | null) => void; timer: ReturnType<typeof setTimeout> }>()
+  private pending = new Map<string, { sessionId: string; resolve: (ack: CommandAck | null) => void; timer: ReturnType<typeof setTimeout> }>()
   private roots = new Map<string, string | null>()
 
   constructor(private options: BridgeOptions) {
     this.store = options.store
-    this.listingSettings = options.listingSettings ?? new ListingSettingsStore()
   }
 
   /** Whether at least one client is attached for the session. */
@@ -79,19 +73,13 @@ export class BridgeServer {
   handleClientMessage(sessionId: string, message: ClientToHostMessage): void {
     switch (message.type) {
       case 'hello':
-        this.replay(sessionId)
+        if (message.sessionId === sessionId) this.replay(sessionId)
         break
       case 'state':
         this.applyState(sessionId, message.state)
         break
-      case 'settings':
-        // SPEC F009: the side-card settings travel on their own message so a
-        // settings-only change reaches the host even when the semantic state
-        // is unchanged.
-        this.listingSettings.apply(sessionId, message.settings)
-        break
       case 'command-result':
-        this.onAck(message.result)
+        this.onAck(sessionId, message.result)
         break
     }
   }
@@ -107,20 +95,43 @@ export class BridgeServer {
     command: ControllerCommand,
     waitMs: number = BRIDGE_ACK_TIMEOUT_MS,
   ): Promise<DispatchOutcome> {
+    const error = this.options.authorize?.(command.name)
+    if (error) return { delivered: false, queued: false, ack: null, error }
     if (!this.isAttached(sessionId)) {
-      this.enqueue(sessionId, { id: randomUUID(), command })
+      if (!this.enqueue(sessionId, { id: randomUUID(), command })) return { delivered: false, queued: false, ack: null, error: { ok: false, code: 'QUEUE_FULL', message: '当前会话等待指令已达 64 条，新指令未入队。' } }
       return { delivered: false, queued: true, ack: null }
     }
     const id = randomUUID()
-    const ackPromise = this.expectAck(id, waitMs)
-    this.broadcast(sessionId, JSON.stringify({ type: 'command', id, command }))
+    const ackPromise = this.expectAck(sessionId, id, waitMs)
+    const delivered = this.broadcast(sessionId, JSON.stringify({ type: 'command', id, command }))
+    if (!delivered) {
+      this.onAck(sessionId, { id, ok: false, code: 'SIDEBAR_UNAVAILABLE', message: '客户端连接已失效，指令未发送。' })
+    }
     const ack = await ackPromise
-    return { delivered: true, queued: false, ack }
+    return { delivered, queued: false, ack }
   }
 
   /** Drop every queued command (feature off / teardown). */
   drain(sessionId: string): void {
     this.queues.delete(sessionId)
+  }
+
+  prune(): void {
+    for (const [sessionId, entries] of this.queues) {
+      const next = entries.filter(e => !this.options.authorize?.(e.command.name))
+      if (next.length) this.queues.set(sessionId, next)
+      else this.queues.delete(sessionId)
+    }
+  }
+
+  invalidate(): void {
+    this.queues.clear()
+    for (const [id, entry] of this.pending) {
+      clearTimeout(entry.timer)
+      entry.resolve({ id, ok: false, code: 'SIDEBAR_UNAVAILABLE', message: 'better-sidebar 已停用，等待操作已取消。' })
+    }
+    this.pending.clear()
+    this.store.invalidate()
   }
 
   /** Reject and clear every pending ack waiter and queue (teardown). */
@@ -133,35 +144,39 @@ export class BridgeServer {
     this.queues.clear()
     this.sockets.clear()
     this.roots.clear()
-    this.listingSettings.dispose()
   }
 
   // ── internals ───────────────────────────────────────────────────────────
 
-  private broadcast(sessionId: string, message: string): void {
+  private broadcast(sessionId: string, message: string): boolean {
     const set = this.sockets.get(sessionId)
-    if (set === undefined) return
+    if (set === undefined) return false
+    let delivered = false
     for (const sender of [...set]) {
       try {
         sender(message)
+        delivered = true
+        break
       } catch {
         // A dead sender surfaces on close/error; ignore here.
       }
     }
+    return delivered
   }
 
-  private enqueue(sessionId: string, entry: { id: string; command: ControllerCommand }): void {
+  private enqueue(sessionId: string, entry: { id: string; command: ControllerCommand }): boolean {
     const list = this.queues.get(sessionId)
     if (list === undefined) {
       this.queues.set(sessionId, [entry])
-      return
+      return true
     }
     if (list.length >= 64) {
       // Bound the queue so an absent sidebar cannot accumulate unbounded
       // work; drop the newest and keep the oldest (opens the user asked for).
-      return
+      return false
     }
     list.push(entry)
+    return true
   }
 
   private replay(sessionId: string): void {
@@ -169,30 +184,33 @@ export class BridgeServer {
     if (list === undefined || list.length === 0) return
     this.queues.delete(sessionId)
     for (const entry of list) {
-      this.broadcast(sessionId, JSON.stringify({ type: 'command', id: entry.id, command: entry.command }))
+      if (this.options.authorize?.(entry.command.name)) continue
+      if (!this.broadcast(sessionId, JSON.stringify({ type: 'command', id: entry.id, command: entry.command }))) this.enqueue(sessionId, entry)
     }
   }
 
-  private expectAck(id: string, waitMs: number): Promise<CommandAck | null> {
+  private expectAck(sessionId: string, id: string, waitMs: number): Promise<CommandAck | null> {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         resolve(null)
       }, waitMs)
-      this.pending.set(id, { resolve, timer })
+      this.pending.set(id, { sessionId, resolve, timer })
     })
   }
 
-  private onAck(ack: CommandAck): void {
+  private onAck(sessionId: string, ack: CommandAck): void {
     const pending = this.pending.get(ack.id)
-    if (pending === undefined) return
+    if (pending === undefined || pending.sessionId !== sessionId) return
     clearTimeout(pending.timer)
     this.pending.delete(ack.id)
     pending.resolve(ack)
   }
 
   private applyState(sessionId: string, wire: SidebarStateWire): void {
+    if (wire.sessionId !== sessionId || this.options.authorize?.('sync_state')) return
     void this.rootOf(sessionId).then((root) => {
+      if (this.options.authorize?.('sync_state') || !this.isAttached(sessionId)) return
       this.store.apply(sessionId, wire, root, this.options.now?.() ?? Date.now())
     })
   }

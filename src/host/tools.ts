@@ -1,5 +1,5 @@
 /**
- * The controller's eleven model-facing tools.
+ * The controller's twelve model-facing tools, registered by capability gate.
  *
  * Every tool is small and purpose-specific (no catch-all `workspace(action)`
  * tool); every tool returns ONE canonical structured JSON value with an
@@ -12,11 +12,15 @@
  * Session scoping: every tool binds to the CALLING agent's session
  * (`exec.agent.session.id`) — the model never passes a sessionId. Path
  * arguments are resolved against that session's cwd (natural language paths)
- * and fenced to its workspace. State-mutating tools dispatch a command over
+ * with the legacy/listing workspace fence and enhanced absolute-path support.
+ * State-mutating tools dispatch a command over
  * the bridge: a connected sidebar applies it immediately, an unattached one
  * queues it (replayed when that session's sidebar next becomes visible).
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { resolve } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { classifyOpenTarget } from './open-target.ts'
 import type { ParameterPropertySpec, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type {
   ControllerCode,
@@ -32,6 +36,7 @@ import type { PathKindResult, PathResolveResult } from './paths.ts'
 
 /** Every tool name (kept in sync for SKILL/docs contract tests). */
 export const CONTROLLER_TOOL_NAMES = [
+  'better_sidebar_open',
   'get_sidebar_state',
   'show_sidebar',
   'hide_sidebar',
@@ -55,6 +60,7 @@ export interface ControllerBridge {
 
 /** Everything a tool needs from the host (injectable for tests). */
 export interface ControllerDeps {
+  authorize?(name: string): BaseResult | undefined
   getCwd(sessionId: string): Promise<string | null>
   store: ControllerStateStore
   bridge: ControllerBridge
@@ -63,8 +69,8 @@ export interface ControllerDeps {
   pathKind(path: string): Promise<PathKindResult>
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<ListDirectoryResult>
   /**
-   * Effective side-card listing settings for one session (SPEC F009).
-   * Optional so a host without the settings mirror keeps the defaults.
+   * Effective listing settings read from the upstream persistent document.
+   * Optional for test harnesses that use the documented defaults.
    */
   listingSettings?(sessionId: string): ListingSettings
   /** How long a dispatched command waits for the client ack. */
@@ -114,18 +120,19 @@ function outcomeResult<V extends object>(
   queuedMessage: string,
   value: V,
 ): BaseResult & V & { delivered: boolean; queued: boolean } {
+  if (outcome.error) return { ...outcome.error, ...value, delivered: false, queued: false }
   if (outcome.ack !== null) {
     if (outcome.ack.ok) {
       return {
         ...success((outcome.ack.code as ControllerCode | undefined) ?? 'OK', outcome.ack.message ?? okMessage),
-        delivered: true,
+        delivered: outcome.delivered,
         queued: false,
         ...value,
       }
     }
     return {
       ...failure((outcome.ack.code as ControllerCode | undefined) ?? 'INTERNAL_ERROR', outcome.ack.message ?? '客户端执行失败。'),
-      delivered: true,
+      delivered: outcome.delivered,
       queued: false,
       ...value,
     }
@@ -139,8 +146,8 @@ function outcomeResult<V extends object>(
     }
   }
   return {
-    ...failure('BRIDGE_TIMEOUT', 'Sidebar 未在预期时间内确认操作，请稍后重试或确认侧边栏已打开。'),
-    delivered: true,
+    ...failure('BRIDGE_TIMEOUT', 'Sidebar 操作结果尚未确认。请先查询状态，避免重复打开。'),
+    delivered: outcome.delivered,
     queued: false,
     ...value,
   }
@@ -153,7 +160,7 @@ function textOf(result: BaseResult & Record<string, unknown>): string {
   if (result.sidebarVisible !== undefined) lines.push(`侧边栏显示: ${String(result.sidebarVisible)}`)
   if (result.currentFile !== undefined) lines.push(`当前文件: ${String(result.currentFile)}`)
   if (result.previousFile !== undefined) lines.push(`上一个文件: ${String(result.previousFile)}`)
-  if (result.queued === true) lines.push('（操作已排队，将在 Sidebar 可见时自动应用）')
+  if (result.queued === true) lines.push('（操作已排队，将在 调用会话界面连接时自动应用）')
   return lines.join('\n')
 }
 
@@ -270,6 +277,30 @@ export function stateView(state: ControllerState | null, connected: boolean): Co
 /** Register the eleven controller tools. Returns the combined disposer. */
 export function registerControllerTools(ctx: { tools: { register(tool: unknown): () => void } }, deps: ControllerDeps): () => void {
   const disposers: Array<() => void> = []
+  const originalRegister = ctx.tools.register.bind(ctx.tools)
+  ctx = { tools: { register: (raw) => {
+    const tool = raw as { name: string; execute: (...args: unknown[]) => Promise<unknown> }
+    if (deps.authorize?.(tool.name)) return () => {}
+    return originalRegister({ ...tool, execute: async (...args: unknown[]) => {
+      const denied = deps.authorize?.(tool.name)
+      if (denied) return denied
+      const sessionId = sessionIdOf(args[1] as ToolRunContext)
+      if (sessionId && deps.authorize && ['close_file', 'activate_file', 'reopen_previous_file'].includes(tool.name) && deps.bridge.isAttached(sessionId)) {
+        const sync = await deps.bridge.dispatch(sessionId, { name: 'sync_state' }, deps.ackTimeoutMs)
+        if (sync.error || sync.ack?.ok !== true) return outcomeResult(sync, '', '', {})
+      }
+      const result = await tool.execute(...args)
+      return deps.authorize?.(tool.name) ?? result
+    } })
+  } } }
+
+  const knownFile = async (sessionId: string, cwd: string, raw: string): Promise<PathResolveResult> => {
+    const lexical = resolve(cwd, raw)
+    const canonical = await realpath(lexical).catch(() => lexical)
+    const key = (s: string) => process.platform === 'win32' ? s.replace(/\\/g, '/').toLowerCase() : s
+    const known = deps.store.get(sessionId)?.openedFiles.find(p => key(p) === key(canonical) || key(p) === key(lexical))
+    return known ? { ok: true, path: known } : deps.resolveLexical(cwd, raw)
+  }
 
   const getCwdOrError = async (sessionId: string): Promise<{ cwd: string } | { error: BaseResult }> => {
     const cwd = await deps.getCwd(sessionId)
@@ -281,9 +312,8 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
 
   /**
    * Effective listing options for one session (SPEC F009). Read once per tool
-   * call so a settings change takes effect on the NEXT call; a host without
-   * the settings mirror (or a session that never pushed any) omits them and
-   * `fs-tree.ts` applies its own defaults.
+   * call so a persistent settings change takes effect on the next call.
+   * Test harnesses may omit this provider and use fs-tree defaults.
    */
   const getListingOptions = (sessionId: string): ListDirectoryOptions | undefined => {
     const settings = deps.listingSettings?.(sessionId)
@@ -315,7 +345,8 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
       const { sessionId } = session
       // Force a fresh push when the client is attached, so the answer is not stale.
       if (deps.bridge.isAttached(sessionId)) {
-        await deps.bridge.dispatch(sessionId, { name: 'sync_state' }, deps.ackTimeoutMs)
+        const sync = await deps.bridge.dispatch(sessionId, { name: 'sync_state' }, deps.ackTimeoutMs)
+        if (sync.error || sync.ack?.ok !== true) return outcomeResult(sync, '', '', { state: null, connected: deps.bridge.isAttached(sessionId) })
       }
       const state = deps.store.get(sessionId)
       if (state === undefined) {
@@ -329,6 +360,34 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
         ...success('OK', '已获取当前 Sidebar 状态。'),
         ...stateView(state, state.connected),
       }
+    },
+  })))
+
+  disposers.push(ctx.tools.register(defineTool({
+    name: 'better_sidebar_open',
+    description: '在调用会话的侧边栏打开文件、文件夹窗口或 HTTP(S) 网页。相对路径按会话工作目录解析，支持外部绝对路径。一般打开优先使用此工具；文件夹窗口不同于展开目录树。需开启侧边卡片的上游打开开关；QUEUED 是等待，网页打开确认不代表网页加载成功。',
+    parameters: {
+      target: { type: 'string', required: true, description: '本地文件/目录路径或 HTTP(S) URL。' },
+      title: { type: 'string', description: '可选建议标题，实际显示遵循上游支持。' },
+    },
+    output: { schema: outputWith({
+      kind: { type: 'string', description: 'file | folder | url' },
+      target: { type: 'string', description: '规范化路径或 URL。' },
+      title: { type: 'string', description: '提交给上游的建议标题。' },
+      delivered: { type: 'boolean', description: '已发送给客户端。' },
+      queued: { type: 'boolean', description: '等待目标会话接入。' },
+    }), render: (_args, value) => [{ type: 'text', text: textOf(value as never) }] },
+    execute: async (args, exec) => {
+      exec.signal.throwIfAborted()
+      const session = requireSession(exec)
+      if ('error' in session) return session.error
+      const cwdResult = await getCwdOrError(session.sessionId)
+      if ('error' in cwdResult) return cwdResult.error
+      const target = await classifyOpenTarget(cwdResult.cwd, args.target, args.title)
+      if (!target.ok) return target
+      exec.signal.throwIfAborted()
+      const outcome = await deps.bridge.dispatch(session.sessionId, { name: 'better_sidebar_open', kind: target.kind, target: target.target, title: target.title }, deps.ackTimeoutMs)
+      return outcomeResult(outcome, '客户端已确认接受打开操作。', '打开操作已排队，等待对应会话界面接入。', { kind: target.kind, target: target.target, title: target.title })
     },
   })))
 
@@ -356,7 +415,7 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
         return outcomeResult(
           outcome,
           visible ? '侧边栏已打开。' : '侧边栏已关闭。',
-          visible ? '侧边栏当前未连接，打开操作已排队，将在 Sidebar 可见时自动应用。' : '侧边栏当前未连接，关闭操作已排队，将在 Sidebar 可见时自动应用。',
+          visible ? '侧边栏当前未连接，打开操作已排队，将在 调用会话界面连接时自动应用。' : '侧边栏当前未连接，关闭操作已排队，将在 调用会话界面连接时自动应用。',
           { sidebarVisible: visible },
         )
       },
@@ -459,7 +518,7 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
         return outcomeResult(
           outcome,
           expanded ? '文件夹已展开。' : '文件夹已收起。',
-          expanded ? '文件夹展开操作已排队，将在 Sidebar 可见时自动应用。' : '文件夹收起操作已排队，将在 Sidebar 可见时自动应用。',
+          expanded ? '文件夹展开操作已排队，将在 调用会话界面连接时自动应用。' : '文件夹收起操作已排队，将在 调用会话界面连接时自动应用。',
           { path: resolved.path, expanded },
         )
       },
@@ -499,7 +558,7 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
         ...outcomeResult(
           outcome,
           '文件树已刷新。',
-          '文件树刷新已排队，将在 Sidebar 可见时自动应用。',
+          '文件树刷新已排队，将在 调用会话界面连接时自动应用。',
           { rootPath: cwdResult.cwd },
         ),
         rootPath: cwdResult.cwd,
@@ -557,7 +616,7 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
       return outcomeResult(
         outcome,
         '文件已打开。',
-        '文件打开操作已排队，将在 Sidebar 可见时自动打开。',
+        '文件打开操作已排队，将在 调用会话界面连接时自动打开。',
         { path: resolved.path },
       )
     },
@@ -591,7 +650,7 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
       if ('error' in cwdResult) return cwdResult.error
       let path: string | undefined
       if (typeof args.path === 'string' && args.path !== '') {
-        const resolved = deps.resolveLexical(cwdResult.cwd, args.path)
+        const resolved = await knownFile(session.sessionId, cwdResult.cwd, args.path)
         if (!resolved.ok) return resolved
         path = resolved.path
       } else {
@@ -604,7 +663,7 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
       return outcomeResult(
         outcome,
         '文件已关闭。',
-        '文件关闭操作已排队，将在 Sidebar 可见时自动应用。',
+        '文件关闭操作已排队，将在 调用会话界面连接时自动应用。',
         { path },
       )
     },
@@ -640,13 +699,13 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
       }
       const cwdResult = await getCwdOrError(session.sessionId)
       if ('error' in cwdResult) return cwdResult.error
-      const resolved = deps.resolveLexical(cwdResult.cwd, args.path)
+      const resolved = await knownFile(session.sessionId, cwdResult.cwd, args.path)
       if (!resolved.ok) return resolved
       const outcome = await deps.bridge.dispatch(session.sessionId, { name: 'activate_file', path: resolved.path }, deps.ackTimeoutMs)
       return outcomeResult(
         outcome,
         '文件已激活。',
-        '文件激活操作已排队，将在 Sidebar 可见时自动应用。',
+        '文件激活操作已排队，将在 调用会话界面连接时自动应用。',
         { path: resolved.path },
       )
     },
@@ -678,14 +737,15 @@ export function registerControllerTools(ctx: { tools: { register(tool: unknown):
       }
       const cwdResult = await getCwdOrError(session.sessionId)
       if ('error' in cwdResult) return cwdResult.error
-      const resolved = await deps.resolveTarget(cwdResult.cwd, previous)
+      const resolved = await classifyOpenTarget(cwdResult.cwd, previous)
       if (!resolved.ok) return resolved
-      const outcome = await deps.bridge.dispatch(session.sessionId, { name: 'open_file', path: resolved.path }, deps.ackTimeoutMs)
+      if (resolved.kind !== 'file') return failure('NOT_A_FILE', '上一个目标已经不是文件。')
+      const outcome = await deps.bridge.dispatch(session.sessionId, { name: 'reopen_previous_file', path: resolved.target }, deps.ackTimeoutMs)
       return outcomeResult(
         outcome,
         '已回到上一个文件。',
-        '回到上一个文件的操作已排队，将在 Sidebar 可见时自动应用。',
-        { path: resolved.path },
+        '回到上一个文件的操作已排队，将在 调用会话界面连接时自动应用。',
+        { path: resolved.target },
       )
     },
   })))

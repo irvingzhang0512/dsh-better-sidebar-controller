@@ -1,7 +1,7 @@
 {
   "name": "dsh-better-sidebar-controller",
-  "version": "0.2.0",
-  "description": "DSH plugin: 基于 dsh-better-sidebar 的 Agent 控制层——通过一组稳定的 Tool 与 Skill，让 Agent 可以用自然语言控制侧边栏文件工作区（State / Bridge / Tools / Skill）。",
+  "version": "0.3.0",
+  "description": "better-sidebar 的模型控制增强扩展：打开文件、文件夹与网页，按侧边卡片开关管理工具，同步原生文件状态。",
   "type": "module",
   "repository": {
     "type": "git",
@@ -69,10 +69,10 @@
     "ws": "^8.18.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": ">=4.0.2 <5.0.0",
-    "@deepseek-ai/dsh-skill": ">=0.1.2-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0",
-    "dsh-better-sidebar": ">=0.19.1 <0.20.0"
+    "@deepseek-ai/cordis": ">=4.0.4 <5.0.0",
+    "@deepseek-ai/dsh-skill": ">=0.2.0-rc.2 <0.3.0",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.3.0",
+    "dsh-better-sidebar": ">=0.25.0 <0.26.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-skill": {
@@ -83,17 +83,19 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-llm": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-scope": "^0.1.5-rc.2",
-    "@deepseek-ai/dsh-skill": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-scope": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-skill": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
     "@types/node": "^24.0.0",
     "@types/react": "^18.3.1",
     "@types/ws": "^8.5.10",
-    "dsh-better-sidebar": "^0.19.1",
+    "dsh-better-sidebar": "0.25.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.8.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.0-rc.2",
+    "react": "18.3.1"
   }
 }

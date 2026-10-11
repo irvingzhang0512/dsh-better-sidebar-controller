@@ -3,7 +3,7 @@ import type { ControllerStateStore } from './controller-state.ts';
 import type { ListDirectoryOptions, ListDirectoryResult } from './fs-tree.ts';
 import type { PathKindResult, PathResolveResult } from './paths.ts';
 /** Every tool name (kept in sync for SKILL/docs contract tests). */
-export declare const CONTROLLER_TOOL_NAMES: readonly ["get_sidebar_state", "show_sidebar", "hide_sidebar", "list_files", "expand_folder", "collapse_folder", "refresh_tree", "open_file", "close_file", "activate_file", "reopen_previous_file"];
+export declare const CONTROLLER_TOOL_NAMES: readonly ["better_sidebar_open", "get_sidebar_state", "show_sidebar", "hide_sidebar", "list_files", "expand_folder", "collapse_folder", "refresh_tree", "open_file", "close_file", "activate_file", "reopen_previous_file"];
 export type ControllerToolName = (typeof CONTROLLER_TOOL_NAMES)[number];
 /** The bridge face tools use (a small subset of {@link BridgeServer}). */
 export interface ControllerBridge {
@@ -12,6 +12,7 @@ export interface ControllerBridge {
 }
 /** Everything a tool needs from the host (injectable for tests). */
 export interface ControllerDeps {
+    authorize?(name: string): BaseResult | undefined;
     getCwd(sessionId: string): Promise<string | null>;
     store: ControllerStateStore;
     bridge: ControllerBridge;
@@ -20,8 +21,8 @@ export interface ControllerDeps {
     pathKind(path: string): Promise<PathKindResult>;
     listDirectory(path: string, options?: ListDirectoryOptions): Promise<ListDirectoryResult>;
     /**
-     * Effective side-card listing settings for one session (SPEC F009).
-     * Optional so a host without the settings mirror keeps the defaults.
+     * Effective listing settings read from the upstream persistent document.
+     * Optional for test harnesses that use the documented defaults.
      */
     listingSettings?(sessionId: string): ListingSettings;
     /** How long a dispatched command waits for the client ack. */

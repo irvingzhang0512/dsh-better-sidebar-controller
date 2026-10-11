@@ -73,6 +73,14 @@ export class ControllerStateStore {
     this.listeners.clear()
   }
 
+  invalidate(): void {
+    for (const [sessionId, current] of this.states) {
+      const next = { ...current, connected: false, currentFile: null, previousFile: null, fileCandidate: null, fileCandidateSource: null, openedFiles: [] }
+      this.states.set(sessionId, next)
+      this.emit(sessionId, next)
+    }
+  }
+
   private emit(sessionId: string, state: ControllerState): void {
     for (const listener of this.listeners.get(sessionId) ?? []) listener(state)
   }

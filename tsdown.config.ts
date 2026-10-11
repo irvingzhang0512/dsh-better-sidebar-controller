@@ -14,6 +14,7 @@
  * accidental @deepseek-ai value import or Node builtin leaking in.
  */
 import { builtinModules } from 'node:module'
+import { readFileSync } from 'node:fs'
 import type { UserConfig } from 'tsdown'
 
 /** Node builtins must never survive into the browser module-loader factory. */
@@ -30,6 +31,11 @@ const BUNDLE_ID = 'dsh-better-sidebar-controller'
  *  never reach this gate). */
 function purityGate(): NonNullable<UserConfig['plugins']> {
   return [
+    {
+      name: 'sidebar-controller:bundled-guide',
+      resolveId(source: string) { return source === 'virtual:sidebar-controller-guide' ? '\0sidebar-controller-guide' : null },
+      load(id: string) { return id === '\0sidebar-controller-guide' ? `export default ${JSON.stringify(readFileSync(new URL('./docs/usage.md', import.meta.url), 'utf8'))}` : null },
+    },
     {
       name: 'dsh-better-sidebar-controller:client-purity',
       resolveId(source: string) {

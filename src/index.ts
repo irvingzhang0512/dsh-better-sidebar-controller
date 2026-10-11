@@ -7,7 +7,7 @@
  *   Bridge → better-sidebar → file tree / file / tab state
  *
  * This module mounts:
- * - the eleven controller tools (get_sidebar_state / show_sidebar /
+ * - the twelve gated controller tools (better_sidebar_open / get_sidebar_state / show_sidebar /
  *   hide_sidebar / list_files / expand_folder / collapse_folder /
  *   refresh_tree / open_file / close_file / activate_file /
  *   reopen_previous_file);
@@ -16,11 +16,9 @@
  *   pushes the controller state mirror back;
  * - the per-session state mirror.
  *
- * better-sidebar is a soft dependency: the host mounts regardless; the
- * browser client only activates once `ctx.betterSidebar` is provided. Until
- * a session's sidebar client attaches, mutating tools report QUEUED and
- * `get_sidebar_state` reports SIDEBAR_UNAVAILABLE — both with actionable
- * messages.
+ * The internal service mounts regardless. Model capabilities require an
+ * active compatible better-sidebar and its authoritative persisted gates.
+ * Only an allowed operation awaiting its own session UI can be queued.
  */
 import { WebSocketServer } from 'ws'
 import type { IncomingMessage } from 'node:http'
@@ -29,7 +27,8 @@ import { attachSocket } from './host/bridge-socket.ts'
 import { BRIDGE_ACK_TIMEOUT_MS, BridgeServer } from './host/bridge-server.ts'
 import { ControllerStateStore } from './host/controller-state.ts'
 import { listDirectorySafe } from './host/fs-tree.ts'
-import { ListingSettingsStore } from './host/listing-settings.ts'
+import { readSidebarAccess, type AccessSource } from './host/access.ts'
+import { refusal } from './shared/access.ts'
 import { pathKind, resolveLexicalTarget, resolveWorkspaceTarget } from './host/paths.ts'
 import { loadBundledSkill } from './host/skill-registration.ts'
 import { registerControllerTools } from './host/tools.ts'
@@ -55,7 +54,19 @@ export const BRIDGE_PATH = '/sidebar-controller/ws'
  */
 export function apply(ctx: Context): void {
   const store = new ControllerStateStore()
-  const listingSettings = new ListingSettingsStore()
+  const readAccess = () => {
+    const editor = ctx.get('configEditor') as unknown as Pick<AccessSource, 'entries'> | undefined
+    const settings = ctx.get('settings') as unknown as Pick<AccessSource, 'describe'> | undefined
+    const packages = ctx.get('pluginPackages') as unknown as { packageOf(name: string, baseUrl: string): { version?: string } | undefined } | undefined
+    return readSidebarAccess(editor && settings ? {
+      entries: () => editor.entries(), describe: () => settings.describe(),
+      versionOf: entry => {
+        const baseUrl = entry.parent?.tree.ctx.baseUrl
+        return baseUrl && entry.options.name ? packages?.packageOf(entry.options.name, baseUrl)?.version : undefined
+      },
+    } : undefined)
+  }
+  const authorize = (name: string) => refusal(name, readAccess())
   const removeService = ctx.provide('sidebarController', {
     id: 'dsh-better-sidebar-controller' as const,
     getState: (sessionId: string) => store.get(sessionId),
@@ -63,7 +74,7 @@ export function apply(ctx: Context): void {
   })
   const bridge = new BridgeServer({
     store,
-    listingSettings,
+    authorize,
     resolveWorkspaceRoot: async (sessionId) => {
       const session = ctx.sessions.get(sessionId)
       const cwd = session?.header?.cwd
@@ -96,7 +107,7 @@ export function apply(ctx: Context): void {
     },
   }), 'dsh-better-sidebar-controller: bridge WebSocket')
 
-  const toolsDisposer = registerControllerTools(ctx, {
+  const deps = {
     getCwd: async (sessionId) => {
       const session = ctx.sessions.get(sessionId)
       const cwd = session?.header?.cwd
@@ -109,9 +120,31 @@ export function apply(ctx: Context): void {
     resolveLexical: resolveLexicalTarget,
     pathKind,
     listDirectory: listDirectorySafe,
-    listingSettings: (sessionId: string) => listingSettings.get(sessionId),
+    listingSettings: () => readAccess().listing,
+    authorize,
     ackTimeoutMs: BRIDGE_ACK_TIMEOUT_MS,
-  })
+  } satisfies Parameters<typeof registerControllerTools>[1]
+  let toolsDisposer = () => {}
+  let accessKey = ''
+  const refreshAccess = () => {
+    const access = readAccess()
+    const key = JSON.stringify([access.available, access.open, access.control])
+    if (key === accessKey) return
+    accessKey = key
+    toolsDisposer()
+    if (!access.available) bridge.invalidate()
+    else bridge.prune()
+    toolsDisposer = registerControllerTools(ctx, deps)
+  }
+  refreshAccess()
+  ctx.effect(() => {
+    let stopped = false
+    const refresh = () => queueMicrotask(() => { if (!stopped) refreshAccess() })
+    const events = ctx as unknown as { on(event: string, listener: () => void, options: { global: boolean }): () => void }
+    const off = events.on('settings/document-updated', refresh, { global: true })
+    const timer = setInterval(refreshAccess, 500)
+    return () => { stopped = true; clearInterval(timer); off() }
+  }, 'dsh-better-sidebar-controller: authoritative settings')
 
   // Self-register the bundled SKILL.md on `ctx.skills` (the dsh-skill runtime
   // registry). Installing the plugin therefore also installs its skill — no

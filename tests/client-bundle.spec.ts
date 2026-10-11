@@ -1,270 +1,181 @@
-/**
- * 构建产物冒烟 + 锚点标签清理回归（lib/client.js）。
- *
- * 回归背景（SPEC F007「获取 store 后清理锚点」）：better-sidebar 0.19+ 在挂了
- * 原生右侧栏（`ctx.sidebarRight`）时会把 `openTab` 改投到原生页面，锚点因此
- * **不在** `state.bottomSplits` 里；旧实现以 bottomSplits 作为清理前置条件，
- * 原生锚点永远关不掉，泄漏成侧边栏里的空白页（新窗口每次加载都出现）。
- *
- * 本用例直接跑构建产物：确认 bundle 以包名注册、apply 能挂载，并覆盖两种落点
- * 的锚点清理（原生落点必须也调用 closeTab）。lib/client.js 未构建时整组跳过。
- */
 import { describe, expect, it } from 'vitest'
-import { existsSync, readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { readFileSync } from 'node:fs'
 import { createContext, runInContext } from 'node:vm'
-import type { Context } from 'dsh-better-sidebar'
-import { homeTab, leaf, makeState, snapshot } from './helpers/sidebar-fixtures.ts'
+import { editorTab, leaf, makeState, snapshot } from './helpers/sidebar-fixtures.ts'
 
-const BUNDLE_PATH = fileURLToPath(new URL('../lib/client.js', import.meta.url))
-const BUNDLE_ID = 'dsh-better-sidebar-controller'
-const ANCHOR_TAB_ID = 'dsh-better-sidebar-controller:anchor'
-
-interface CapturedModule {
-  id: string
-  factory: (require: (id: string) => unknown) => Record<string, unknown>
-}
-
-interface Probe {
-  module: CapturedModule
-  context: ReturnType<typeof createContext>
-  tabs: Array<Record<string, unknown>>
-  opened: Array<Record<string, unknown>>
-  closed: string[]
-  activated: string[]
-  sockets: WebSocketStub[]
-  /** 假 store 的订阅者（subscribeState），用来模拟"快照变化"。 */
-  listeners: Array<() => void>
-  /** 可变快照持有者：改 prefs 后调用 listeners 即可模拟设置变更。 */
-  current: { value: ReturnType<typeof snapshot> }
-}
-
-/** 按指定落点策略构造一套最小假 ctx + DOM/浏览器桩，并执行 bundle。 */
-function loadBundle(options: { nativeLanding: boolean; prefs?: unknown }): Probe {
-  const captured: CapturedModule[] = []
-  const tabs: Array<Record<string, unknown>> = []
-  const opened: Array<Record<string, unknown>> = []
+const anchor = 'dsh-better-sidebar-controller:anchor'
+const flush = () => new Promise(resolve => setTimeout(resolve, 15))
+function probe(ready = true) {
+  let mounted: string | undefined = 'a'
+  let active = 'initial'
+  let visible = true
+  let entries: Array<{ sessionId: string; tabId: string; kind: string; contentId: string }> = []
+  let current = snapshot('a', makeState(), { agentOpenTools: true, pluginSettings: { [anchor]: { agentControlTools: true } } } as never)
+  const notifications: Array<() => void> = []
+  const timers: Array<{ fn: () => void; ms: number }> = []
+  const descriptors: Array<Record<string, any>> = []
+  const documentEvents = new Map<string, (event: any) => void>()
+  const operations: string[] = []
+  const scopes: any[] = []
   const closed: string[] = []
-  const activated: string[] = []
-  const listeners: Array<() => void> = []
-  const anchorTab = { id: ANCHOR_TAB_ID, type: 'dsh-better-sidebar-controller:anchor', title: '' }
-  const current = { value: snapshot('s1', makeState(), options.prefs) }
-
+  let teardown = () => {}
+  const notify = () => notifications.forEach(fn => fn())
+  const address = (path: string) => `dsh-resource://file/session/${mounted}/${path.replace(/\\/g, '/')}`
+  const sidebar = {
+    mounted: { getSnapshot: () => mounted, subscribe: (fn: () => void) => { notifications.push(fn); return () => {} } },
+    openTabs: { getSnapshot: () => entries, subscribe: (fn: () => void) => { notifications.push(fn); return () => {} } },
+    active: () => { if (!ready) return undefined; const found = entries.find(t => t.tabId === active); return found ? { ...found, id: found.tabId } : { id: active, kind: 'guide', contentId: '' } },
+    isExpanded: () => visible, toggleExpanded: () => { visible = !visible },
+    focus: (id: string) => { active = id; operations.push(`focus:${id}`) },
+    close: (id: string) => { closed.push(id); entries = entries.filter(t => t.tabId !== id); active = entries.at(-1)?.tabId ?? 'guide' },
+    openTab: (kind: string, options: any) => { active = `browser-${entries.length}`; entries.push({ sessionId: mounted!, tabId: active, kind, contentId: `dsh-resource://page/browser/${options.params.url}` }); operations.push('browser') },
+  }
+  const add = (path: string) => { active = path; entries.push({ sessionId: mounted!, tabId: active, kind: 'editor', contentId: address(path) }); operations.push(`open:${path}`) }
+  const store = { reduce: (fn: any) => { current = { ...current, state: fn(current.state) }; notify() } }
   const service = {
-    registerTab: (descriptor: Record<string, unknown>) => {
-      tabs.push(descriptor)
-      return () => undefined
+    registerTab: (d: any) => { descriptors.push(d); return () => {} }, getSnapshot: () => current,
+    subscribeState: (fn: () => void) => { notifications.push(fn); return () => {} },
+    isTabEnabled: () => true, hostRouteUrl: (path: string) => `http://127.0.0.1:19991/prefix/${path}`,
+    openTab: (seed: any, scope: any) => {
+      if (seed.type === anchor) { active = anchor; descriptors[0]!.component({ store, scope }); return }
+      add(seed.path)
+    }, closeTab: (id: string) => {
+      closed.push(id)
+      const pane = current.state?.bottomSplits
+      if (pane?.kind === 'leaf' && pane.tabs.some(t => t.id === id)) {
+        const tabs = pane.tabs.filter(t => t.id !== id)
+        current = { ...current, state: { ...current.state!, bottomSplits: { ...pane, tabs, active: tabs[0]?.id ?? null } } }; notify()
+      }
+    }, activateTab: (id: string) => {
+      const pane = current.state?.bottomSplits
+      if (pane?.kind === 'leaf') current = { ...current, state: { ...current.state!, bottomSplits: { ...pane, active: id } } }
+      notify()
     },
-    getSnapshot: () => current.value,
-    subscribeState: (listener: () => void) => {
-      listeners.push(listener)
-      return () => undefined
-    },
-    openTab: (seed: Record<string, unknown>) => {
-      opened.push(seed)
-      if (options.nativeLanding) return
-      // 底部落点：锚点进入插件自己的 bottomSplits 并成为活动标签。
-      current.value = snapshot('s1', makeState({
-        splits: leaf('pane-1', [homeTab('t-home'), anchorTab as never], ANCHOR_TAB_ID),
-        panelOpen: true,
-      }))
-    },
-    closeTab: (tabId: string) => { closed.push(tabId) },
-    activateTab: (tabId: string) => { activated.push(tabId) },
+    openFile: (scope: any, path: string) => { scopes.push(scope); if (!entries.some(t => t.tabId === path)) add(path); else active = path },
   }
-
-  const fakeCtx = {
-    effect: (fn: () => (() => void) | void) => {
-      fn()
-      return () => undefined
-    },
-    get: (name: string) => (name === 'sidebarRight'
-      ? { isExpanded: () => true, toggleExpanded: () => undefined }
-      : undefined),
-    betterSidebar: service,
+  const sockets: Socket[] = []
+  class Socket {
+    static OPEN = 1; readyState = 0; onopen?: () => void; onmessage?: (event: any) => void; onclose?: () => void; onerror?: () => void
+    sent: any[] = []
+    constructor(public url: string) { sockets.push(this) }
+    send(text: string) { this.sent.push(JSON.parse(text)) }
+    close() { this.readyState = 3; this.onclose?.() }
+    open() { this.readyState = 1; this.onopen?.() }
+    command(name: string, args = {}, id = name) { this.onmessage?.({ data: JSON.stringify({ type: 'command', id, command: { name, ...args } }) }) }
   }
-
-  const windowStub: Record<string, unknown> = {
-    __ModuleLoader__: { load: (module: CapturedModule) => { captured.push(module) } },
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined,
-    location: { origin: 'http://127.0.0.1:3080', protocol: 'http:' },
-    setTimeout: () => 0,
-    clearTimeout: () => undefined,
-    setInterval: () => 0,
-    clearInterval: () => undefined,
-  }
-  const socketCalls: string[] = []
-  const sockets: WebSocketStub[] = []
-  class WebSocketStub {
-    static readonly OPEN = 1
-    readyState = 0
-    onopen: unknown
-    onmessage: unknown
-    onclose: unknown
-    onerror: unknown
-    readonly sent: string[] = []
-    constructor(readonly url: string) {
-      socketCalls.push(url)
-      sockets.push(this)
-    }
-    send(message: string): void { this.sent.push(message) }
-    close(): void { /* no-op */ }
-  }
-
+  let module: any
   const context = createContext({
-    window: windowStub,
-    console,
-    WebSocket: WebSocketStub,
-    URL,
-    URLSearchParams,
-    Event: class EventStub { constructor(readonly type: string) {} },
-    queueMicrotask,
-    structuredClone,
-    setTimeout: () => 0,
-    clearTimeout: () => undefined,
-    require: (id: string) => { throw new Error(`unexpected require("${id}") in client bundle`) },
-    __probe: { fakeCtx, service, current },
+    window: { __ModuleLoader__: { load: (m: any) => { module = m } }, setTimeout: (fn: () => void, ms: number) => { timers.push({ fn, ms }); return timers.length }, clearTimeout: () => {}, setInterval: () => 1, clearInterval: () => {}, dispatchEvent: () => {} },
+    document: { addEventListener: (name: string, fn: any) => documentEvents.set(name, fn), removeEventListener: () => {} },
+    WebSocket: Socket, URL, AbortSignal, Event, queueMicrotask, console,
+    fetch: async (_url: string, options: any) => {
+      const body = JSON.parse(options.body)
+      return { ok: true, json: async () => ({ ok: true, value: body.query === undefined ? { cwd: 'F:/workspace' } : { matches: [body.query], dirs: body.query.endsWith('/docs') ? [body.query] : [] } }) }
+    },
   })
-  runInContext(readFileSync(BUNDLE_PATH, 'utf8'), context)
-
-  const module = captured[0]!
-  const exports = module.factory((id) => (context as unknown as { require: (id: string) => unknown }).require(id))
-  ;(exports.apply as (ctx: Context) => void)(fakeCtx as unknown as Context)
-
-  return { module, context, tabs, opened, closed, activated, sockets, listeners, current }
-}
-
-/** 模拟浏览器侧 WebSocket 握手完成：置为 OPEN 并触发 onopen。 */
-function openSocket(probe: Probe, index = 0): WebSocketStub {
-  const ws = probe.sockets[index]!
-  ws.readyState = 1
-  ;(ws.onopen as () => void)()
-  return ws
-}
-
-/** 解析该 socket 收到的全部消息。 */
-function messagesOf(ws: WebSocketStub): Array<Record<string, unknown>> {
-  return ws.sent.map(text => JSON.parse(text) as Record<string, unknown>)
-}
-
-/** 让锚点组件挂载（真实环境由侧边栏渲染该隐藏页），随后清空微任务队列。 */
-async function mountAnchor(probe: Probe): Promise<void> {
-  const descriptor = probe.tabs[0]!
-  const component = descriptor.component as (props: { store: unknown }) => unknown
-  let reduced = 0
-  const store = {
-    reduce: (fn: (state: Record<string, unknown>) => Record<string, unknown>) => { reduced += 1; return fn({ bottomOpen: true }) },
+  runInContext(readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8'), context)
+  const exports = module.factory((id: string) => { if (id !== 'react') throw new Error(`unexpected external ${id}`); return { createElement: (type: any, props: any, ...children: any[]) => ({ type, props, children }) } })
+  exports.apply({ effect: (fn: any) => { teardown = fn() }, get: () => sidebar, betterSidebar: service, sessions: { list: { subscribe: (fn: () => void) => { notifications.push(fn); return () => {} } } } })
+  timers.filter(t => t.ms === 0).forEach(t => t.fn())
+  return {
+    sockets, descriptors, operations, scopes, closed, timers, sidebar, inject: exports.inject,
+    ready: () => { ready = true; notify() }, teardown: () => teardown(), notify,
+    select: (path: string) => { active = path; notify() }, add,
+    bottom: (state: ReturnType<typeof makeState>) => { current = { ...current, state }; notify() },
+    focusBottom: () => documentEvents.get('pointerdown')?.({ target: { closest: () => ({}) } }),
+    prefs: (prefs: any) => { current = { ...current, prefs }; notify() },
+    switch: (id?: string) => { mounted = id; current = snapshot(id, makeState(), current.prefs); notify() },
+    state: () => sockets.at(-1)!.sent.filter(m => m.type === 'state').at(-1)?.state,
   }
-  component({ store })
-  await new Promise(resolve => setTimeout(resolve, 0))
-  void reduced
 }
 
-describe.skipIf(!existsSync(BUNDLE_PATH))('lib/client.js 构建产物冒烟与锚点清理', () => {
-  it('以包名注册、apply 挂载并注册隐藏锚点标签（含 F009 标题与设置行）', () => {
-    const probe = loadBundle({ nativeLanding: true })
-    expect(probe.module.id).toBe(BUNDLE_ID)
-    expect(probe.tabs).toHaveLength(1)
-    expect(probe.tabs[0]!.id).toBe('dsh-better-sidebar-controller:anchor')
-    expect(probe.tabs[0]!.hidden).toBe(true)
-    expect(probe.tabs[0]!.single).toBe(true)
-    // SPEC F009：锚点卡片有正式标题（可见修正只有标题）。
-    expect((probe.tabs[0]!.title as () => string)()).toBe('文件树与列表')
-    // SPEC F009：两行 pluginToggles（switch + number，min 1），键为插件本地键。
-    const settings = probe.tabs[0]!.settings as {
-      pluginToggles: Array<Record<string, unknown>>
-    }
-    expect(settings.pluginToggles).toHaveLength(2)
-    expect(settings.pluginToggles[0]).toMatchObject({ key: 'includeHiddenEntries', type: 'switch' })
-    expect(settings.pluginToggles[1]).toMatchObject({ key: 'maxListedEntries', type: 'number', min: 1 })
+describe('built desktop client', () => {
+  it('uses cwd on the first open and reuses an existing file across address spellings', async () => {
+    const p = probe(); const ws = p.sockets[0]!; ws.open(); await flush()
+    ws.command('better_sidebar_open', { kind: 'file', target: 'F:/workspace/A.md', title: 'A' }); await flush()
+    expect(p.scopes[0]).toMatchObject({ sessionId: 'a', cwd: 'F:/workspace' })
+    ws.command('open_file', { path: 'f:/workspace/a.md' }); await flush()
+    expect(p.operations.filter(op => op.startsWith('open:'))).toHaveLength(1)
+    expect(ws.sent.filter(m => m.type === 'command-result').every(m => m.result.ok)).toBe(true); p.teardown()
   })
-
-  it('锚点仍不进「+」菜单：hidden 保持 true，且没有任何非隐藏描述符', () => {
-    const probe = loadBundle({ nativeLanding: true })
-    expect(probe.tabs.filter(tab => tab.hidden !== true)).toHaveLength(0)
+  it('unifies native and bottom files and controls the actual bottom tab', async () => {
+    const p = probe(); const ws = p.sockets[0]!; ws.open(); await flush()
+    p.add('F:/workspace/native.md')
+    p.bottom(makeState({ bottomOpen: true, splits: leaf('pane-1', [editorTab('bottom-a', 'F:/outside/a.md'), editorTab('bottom-b', 'F:/outside/b.md')]) }))
+    p.focusBottom(); await flush()
+    expect(p.state()).toMatchObject({ currentFile: 'F:/outside/a.md', openedFiles: ['F:/workspace/native.md', 'F:/outside/a.md', 'F:/outside/b.md'] })
+    ws.command('activate_file', { path: 'F:/outside/b.md' }); await flush()
+    expect(p.state().currentFile).toBe('F:/outside/b.md')
+    ws.command('better_sidebar_open', { kind: 'file', target: 'F:/outside/a.md', title: 'A' }); await flush()
+    expect(p.state().currentFile).toBe('F:/outside/a.md'); expect(p.scopes).toHaveLength(0)
+    ws.command('close_file', { path: 'F:/outside/a.md' }); await flush()
+    expect(p.state().openedFiles).not.toContain('F:/outside/a.md'); p.teardown()
   })
-
-  it('原生落点（锚点不在 bottomSplits）：仍然关掉锚点，不残留空白页', async () => {
-    const probe = loadBundle({ nativeLanding: true })
-    // 锚点被投到原生右侧栏：bottomSplits 里没有它。
-    expect(probe.opened).toHaveLength(1)
-    expect(probe.opened[0]!.type).toBe('dsh-better-sidebar-controller:anchor')
-
-    await mountAnchor(probe)
-
-    // 回归点：旧实现因 bottomSplits 守卫直接 return，这里不会出现 closeTab。
-    expect(probe.closed).toContain(ANCHOR_TAB_ID)
+  it('declares accessed services and waits for actual surface readiness', async () => {
+    const p = probe(false)
+    expect(p.inject).toEqual(['betterSidebar', 'sessions', 'sidebarRight'])
+    expect(p.sockets).toHaveLength(0); expect(p.closed).toHaveLength(0)
+    p.ready(); expect(p.sockets).toHaveLength(1)
+    p.sockets[0]!.open(); await flush(); expect(p.closed).toContain(anchor); p.teardown()
   })
-
-  it('底部落点：关掉锚点并恢复原活动标签（既有行为不回退）', async () => {
-    const probe = loadBundle({ nativeLanding: false })
-    await mountAnchor(probe)
-    expect(probe.closed).toContain(ANCHOR_TAB_ID)
-    // 锚点抢占前的活动标签被恢复。
-    expect(probe.activated).toContain('t-home')
+  it('does not report success for a native close no-op', async () => {
+    const p = probe(); const ws = p.sockets[0]!; ws.open(); await flush()
+    p.add('F:/outside/a.md'); p.notify(); await flush()
+    p.sidebar.close = () => {}
+    ws.command('close_file', { path: 'F:/outside/a.md' }); await flush()
+    expect(ws.sent.find(m => m.type === 'command-result')?.result).toMatchObject({ ok: false, code: 'SIDEBAR_UNAVAILABLE' }); p.teardown()
   })
-
-  it('SPEC F009：socket 打开后把两项设置推送给宿主（未设置时为默认值）', () => {
-    const probe = loadBundle({ nativeLanding: true })
-    const ws = openSocket(probe)
-    const settings = messagesOf(ws).filter(message => message.type === 'settings')
-    expect(settings).toHaveLength(1)
-    expect(settings[0]!.settings).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
+  it('cleans restored anchors by their real native IDs when seed records are absent', async () => {
+    const p = probe(); await flush()
+    p.sidebar.openTab(anchor, { params: { url: 'restored' } }); p.notify(); await flush()
+    expect(p.sidebar.openTabs.getSnapshot().some(t => t.kind === anchor)).toBe(false)
+    expect(p.closed).toContain('browser-0'); p.teardown()
   })
-
-  it('SPEC F009：读回 better-sidebar prefs 的 pluginSettings 并同步给宿主', () => {
-    const probe = loadBundle({
-      nativeLanding: true,
-      prefs: {
-        pluginSettings: {
-          [ANCHOR_TAB_ID]: { includeHiddenEntries: false, maxListedEntries: 3 },
-        },
-      },
-    })
-    const ws = openSocket(probe)
-    const settings = messagesOf(ws).filter(message => message.type === 'settings')
-    expect(settings).toHaveLength(1)
-    expect(settings[0]!.settings).toEqual({ includeHiddenEntries: false, maxListedEntries: 3 })
+  it('uses hostRouteUrl and pushes initial state after CONNECTING', async () => {
+    const p = probe(); expect(p.sockets[0]!.url).toBe('ws://127.0.0.1:19991/prefix/sidebar-controller/ws?sessionId=a')
+    await flush(); expect(p.sockets[0]!.sent).toHaveLength(0)
+    p.sockets[0]!.open(); await flush(); expect(p.state()).toMatchObject({ sessionId: 'a', currentFile: null })
+    expect(p.closed).toContain(anchor); expect(p.operations).toContain('focus:initial'); p.teardown()
   })
-
-  it('SPEC F009：prefs 缺失或畸形时回落到默认值，不抛错', () => {
-    const noPrefs = loadBundle({ nativeLanding: true, prefs: undefined })
-    const wsNoPrefs = openSocket(noPrefs)
-    const a = messagesOf(wsNoPrefs).filter(message => message.type === 'settings')
-    expect(a[0]!.settings).toEqual({ includeHiddenEntries: true, maxListedEntries: 1000 })
-
-    const badPrefs = loadBundle({
-      nativeLanding: true,
-      prefs: { pluginSettings: { [ANCHOR_TAB_ID]: { includeHiddenEntries: 'yes', maxListedEntries: 0 } } },
-    })
-    const wsBad = openSocket(badPrefs)
-    const b = messagesOf(wsBad).filter(message => message.type === 'settings')
-    // 非法布尔按关闭；越界数字由宿主夹取，这里按 min 归一后送出。
-    expect(b[0]!.settings).toEqual({ includeHiddenEntries: false, maxListedEntries: 1 })
+  it('tracks mouse and agent files; folders and browsers never become file pointers', async () => {
+    const p = probe(); const ws = p.sockets[0]!; ws.open(); await flush()
+    ws.command('better_sidebar_open', { kind: 'file', target: 'F:/workspace/会议.md', title: '会议' }); await flush()
+    expect(p.state().currentFile).toBe('F:/workspace/会议.md')
+    ws.command('better_sidebar_open', { kind: 'file', target: 'F:/外部/计划.md', title: '计划' }); await flush()
+    expect(p.state()).toMatchObject({ currentFile: 'F:/外部/计划.md', previousFile: 'F:/workspace/会议.md' })
+    p.select('F:/workspace/会议.md'); await flush(); expect(p.state().previousFile).toBe('F:/外部/计划.md')
+    ws.command('better_sidebar_open', { kind: 'folder', target: 'F:/workspace/docs', title: 'docs' }); await flush()
+    expect(p.state().currentFile).toBeNull(); expect(p.state().openedFiles).not.toContain('F:/workspace/docs')
+    ws.command('better_sidebar_open', { kind: 'url', target: 'https://example.com', title: 'web' }); await flush()
+    expect(p.state().currentFile).toBeNull(); expect(p.operations).toContain('browser'); p.teardown()
   })
-
-  it('SPEC F009：设置未变化时不重复推送，变化后再推送新值', () => {
-    const anchorBlob = { includeHiddenEntries: true, maxListedEntries: 5 }
-    const probe = loadBundle({
-      nativeLanding: true,
-      prefs: { pluginSettings: { [ANCHOR_TAB_ID]: anchorBlob } },
-    })
-    const ws = openSocket(probe)
-    const countSettings = (): number => messagesOf(ws).filter(message => message.type === 'settings').length
-    expect(countSettings()).toBe(1)
-
-    // 快照变化但设置不变：不重复推送（去重保护）。
-    probe.listeners.forEach(listener => listener())
-    expect(countSettings()).toBe(1)
-
-    // 用户在设置页改了值：下一次快照变化就把新值推给宿主。
-    probe.current.value = snapshot('s1', makeState(), {
-      pluginSettings: { [ANCHOR_TAB_ID]: { includeHiddenEntries: false, maxListedEntries: 2 } },
-    })
-    probe.listeners.forEach(listener => listener())
-    expect(countSettings()).toBe(2)
-    const last = messagesOf(ws).filter(message => message.type === 'settings').at(-1)!
-    expect(last.settings).toEqual({ includeHiddenEntries: false, maxListedEntries: 2 })
+  it('accepts activate/close/return on known outside files', async () => {
+    const p = probe(); const ws = p.sockets[0]!; ws.open(); await flush()
+    p.add('F:/outside/a.md'); p.add('F:/outside/b.md'); p.notify(); await flush()
+    ws.command('activate_file', { path: 'F:/outside/a.md' }); await flush(); expect(p.state().currentFile).toBe('F:/outside/a.md')
+    ws.command('reopen_previous_file', { path: 'F:/outside/b.md' }); await flush(); expect(p.state().currentFile).toBe('F:/outside/b.md')
+    ws.command('close_file', { path: 'F:/outside/b.md' }); await flush(); expect(p.state().openedFiles).toEqual(['F:/outside/a.md']); p.teardown()
+  })
+  it('rechecks settings at execution and retains state sync with tools off', async () => {
+    const p = probe(); const ws = p.sockets[0]!; ws.open(); await flush(); p.prefs({ agentOpenTools: false, pluginSettings: {} })
+    ws.command('better_sidebar_open', { kind: 'file', target: 'F:/x.md', title: 'x' }); await flush()
+    expect(ws.sent.find(m => m.type === 'command-result')?.result.code).toBe('TOOL_DISABLED')
+    expect(p.operations.some(x => x.startsWith('open:'))).toBe(false)
+    ws.command('sync_state'); await flush(); expect(ws.sent.at(-1).result.ok).toBe(true); p.teardown()
+  })
+  it('does not operate the other mounted session and forces reconnect state', async () => {
+    const p = probe(); const old = p.sockets[0]!; old.open(); await flush(); p.switch('b')
+    old.command('open_file', { path: 'F:/wrong.md' }); p.sockets.at(-1)!.open(); await flush()
+    expect(p.state().sessionId).toBe('b'); expect(p.operations).not.toContain('open:F:/wrong.md')
+    p.sockets.at(-1)!.close(); p.timers.filter(t => t.ms === 2000).at(-1)!.fn(); p.sockets.at(-1)!.open(); await flush()
+    expect(p.state().sessionId).toBe('b'); p.teardown()
+  })
+  it('settings card hides listing options until enabled and includes the shipped guide', () => {
+    const p = probe(); const updates: any[] = []; const render = p.descriptors[0]!.settings.render
+    const props = { prefs: { agentOpenTools: false }, pluginSettings: {}, updatePluginSetting: (...args: any[]) => updates.push(args) }
+    const off = JSON.stringify(render(props)); expect(off).not.toContain('"children":["列出隐藏项"]'); expect(off).toContain('查看 Agent 使用说明')
+    const on = JSON.stringify(render({ ...props, pluginSettings: { agentControlTools: true } })); expect(on).toContain('列出隐藏项'); expect(on).toContain('BRIDGE_TIMEOUT'); expect(on).toContain('完整操作流程示例'); p.teardown()
+    const legacy = JSON.stringify(render({ ...props, pluginSettings: { agentControlTools: true, maxListedEntries: -2.5 } }))
+    expect(legacy).toContain('"value":1'); expect(legacy).not.toContain('"value":-2.5')
   })
 })
