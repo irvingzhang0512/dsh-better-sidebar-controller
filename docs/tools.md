@@ -2,7 +2,7 @@
 
 ## 增强版目标工具契约
 
-文档版：`sidebar-enhancement-20261011-v1`，用户已确认。对应 [SPEC F010–F013](SPEC.md#本次增强文档版与适用范围)及 [架构](architecture.md#增强控制层目标契约)。本版工具在 0.3.0 实施；验证见 [交付记录](VERIFICATION-0.3.0.md)。普通用户的 Agent 指令示例见 [使用指南](usage.md#增强版如何通过-agent-使用)。
+文档版：`sidebar-enhancement-20261011-v1`，用户已确认。对应 [SPEC F010–F013](SPEC.md#本次增强文档版与适用范围)及 [架构](architecture.md#增强控制层目标契约)。本版工具在 0.3.0 实施；验证见 [交付记录](VERIFICATION-0.3.0.md)。普通用户的 Agent 指令示例见 [使用指南](usage.md#操作分类与示例)。
 
 ### 注册与参数
 
@@ -72,4 +72,4 @@
 
 ## 保留的路径与状态错误
 
-NO_AGENT（无法确定调用会话）、NO_SESSION（无工作目录）、INVALID_PATH、PATH_OUTSIDE_WORKSPACE、FILE_NOT_FOUND、FS_ERROR、NOT_A_DIRECTORY、NOT_A_FILE、FILE_NOT_OPEN、NO_CURRENT_FILE、NO_PREVIOUS_FILE、INTERNAL_ERROR；BRIDGE_NOT_CONNECTED 与 UNKNOWN_COMMAND 保留于协议。具体用户处理方式见 [使用指南](usage.md#结果说明与排查)。
+NO_AGENT（无法确定调用会话）、NO_SESSION（无工作目录）、INVALID_PATH、PATH_OUTSIDE_WORKSPACE、FILE_NOT_FOUND、FS_ERROR、NOT_A_DIRECTORY、NOT_A_FILE、FILE_NOT_OPEN、NO_CURRENT_FILE、NO_PREVIOUS_FILE、INTERNAL_ERROR；BRIDGE_NOT_CONNECTED 与 UNKNOWN_COMMAND 保留于协议。具体用户处理方式见 [使用指南](usage.md#结果与排错)。
