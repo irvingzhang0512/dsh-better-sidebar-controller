@@ -29,14 +29,15 @@ async function mount(open = true, control = true) {
   const tools: ToolDef[] = []
   const prefs = { agentOpenTools: open, pluginSettings: { 'dsh-better-sidebar-controller:anchor': { agentControlTools: control } } }
   app.provide('configEditor', { entries: () => [{ options: { id: 'aggregate:sidebar', name: 'dsh-better-sidebar' }, fiber: { state: 2 }, parent: { tree: { ctx: { baseUrl: 'file:///profile/cordis.yml' } } } }] })
-  app.provide('pluginPackages', { packageOf: () => ({ version: '0.25.0' }) })
+  app.provide('pluginPackages', { packageOf: () => ({ version: '0.28.0' }) })
   app.provide('settings', { describe: () => [{ ns: 'aggregate:sidebar', value: prefs }] })
   const routes: UpgradeRoute[] = []
   const registeredSkills: SkillRegistration[] = []
   app.provide('tools', { register: (tool: ToolDef) => { tools.push(tool); return () => { const at = tools.indexOf(tool); if (at >= 0) tools.splice(at, 1) } } })
   app.provide('webServer', { registerUpgrade: (route: UpgradeRoute) => { routes.push(route); return () => {} } })
   app.provide('sessions', { get: () => undefined })
-  app.provide('webRuntime', { trustedHosts: [] })
+  app.provide('sessionController', { inspect: async () => ({ meta: { cwd: process.cwd() } }) })
+  app.provide('connection', { requestRejection: () => undefined })
   app.provide('skills', { register: (skill: SkillRegistration) => { registeredSkills.push(skill); return () => {} } })
   const fiber = app.plugin({ name, apply, inject })
   fibers.push(fiber)
@@ -63,7 +64,7 @@ describe('plugin host mount', () => {
   })
   it('exports the expected identity and bridge path', () => {
     expect(name).toBe('dsh-better-sidebar-controller')
-    expect(inject.sort()).toEqual(['sessions', 'skills', 'tools', 'webRuntime', 'webServer'])
+    expect([...inject].sort()).toEqual(['connection', 'sessionController', 'sessions', 'skills', 'tools', 'webServer'])
     expect(BRIDGE_PATH).toBe('/sidebar-controller/ws')
   })
   it('registers all twelve controller tools', async () => {

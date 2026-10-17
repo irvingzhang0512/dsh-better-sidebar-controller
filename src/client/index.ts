@@ -1,5 +1,5 @@
 import type { Context } from 'dsh-better-sidebar'
-import type { SidebarStore } from 'dsh-better-sidebar/client/service'
+import type { SidebarStore, TabComponentProps } from 'dsh-better-sidebar/client/service'
 import { activeFileOf, deriveFileContext, findTabByPath, openedFilesOf } from '../shared/derive.ts'
 import { ANCHOR_ID, accessFromPrefs, refusal } from '../shared/access.ts'
 import type { ClientToHostMessage, ControllerCommand, ControllerCode, SidebarStateWire } from '../shared/types.ts'
@@ -204,7 +204,7 @@ export function apply(ctx: Context): void {
       }
       capturing = false
     }
-    const disposeAnchor = service.registerTab({ id: ANCHOR_ID, hidden: true, single: true, title: 'Sidebar Controller 增强控制', settings: { render: ControllerSettings }, component: props => {
+    const disposeAnchor = service.registerTab({ id: ANCHOR_ID, hidden: true, single: true, title: 'Sidebar Controller 增强控制', settings: { render: ControllerSettings }, component: (props: TabComponentProps) => {
       store = props.store
       queueMicrotask(() => { if (!closed) cleanupAnchor() })
       return null

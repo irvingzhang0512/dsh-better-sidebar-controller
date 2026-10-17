@@ -21,7 +21,7 @@ export function readSidebarAccess(source: AccessSource | undefined): AccessState
     const entries = [...source.entries()].filter(e => e.options.name === 'dsh-better-sidebar' && e.disabled !== true && e.fiber?.state === 2)
     if (entries.length !== 1 || !entries[0]?.options.id) return unavailable('SIDEBAR_UNAVAILABLE', '需要一个实际启用的兼容 better-sidebar 实例。')
     const version = source.versionOf(entries[0])
-    if (!version || !/^0\.25\.\d+(?:\+[0-9A-Za-z.-]+)?$/.test(version)) return unavailable('SIDEBAR_UNAVAILABLE', '无法确认兼容的 better-sidebar 0.25.x；增强工具暂不可用。')
+    if (version !== '0.28.0') return unavailable('SIDEBAR_UNAVAILABLE', '无法确认兼容的 better-sidebar 0.28.0；增强工具暂不可用。')
     const views = source.describe()
     const value = views.find(d => d.ns === entries[0]!.options.id)?.value
     if (!value || typeof value !== 'object') return unavailable('SETTINGS_UNAVAILABLE', '无法读取启用的 better-sidebar 持久设置。')

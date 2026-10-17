@@ -1,11 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { isTrustedApiRequest } from '../../src/host/trust-fence.ts'
 
 describe('desktop bridge trust fence', () => {
-  it('accepts only the official custom origin on loopback without cross-site markers', () => {
-    expect(isTrustedApiRequest({ headers: { host: '127.0.0.1:19387', origin: 'dsh-app://app' } }, [])).toBe(true)
-    expect(isTrustedApiRequest({ headers: { host: 'localhost:19387', origin: 'dsh-app://app', 'sec-fetch-site': 'cross-site' } }, [])).toBe(false)
-    expect(isTrustedApiRequest({ headers: { host: 'trusted.example', origin: 'dsh-app://app' } }, ['trusted.example'])).toBe(false)
-    expect(isTrustedApiRequest({ headers: { host: '127.0.0.1:19387', origin: 'dsh-app://evil' } }, [])).toBe(false)
+  it('does not exempt loopback or the native origin from Host authentication', () => {
+    const request = { headers: { host: '127.0.0.1:19387', origin: 'dsh-app://app' } }
+    const requestRejection = vi.fn(() => 401 as const)
+    expect(isTrustedApiRequest(request, { requestRejection })).toBe(false)
+    expect(requestRejection).toHaveBeenCalledWith(request)
+    expect(isTrustedApiRequest(request, { requestRejection: () => 403 })).toBe(false)
+  })
+  it('accepts a request only when the running Host has admitted it', () => {
+    const request = { headers: { host: '127.0.0.1:19387', origin: 'http://127.0.0.1:19387', cookie: 'fixture-signed-cookie' } }
+    expect(isTrustedApiRequest(request, { requestRejection: () => undefined })).toBe(true)
   })
 })

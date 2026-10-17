@@ -13,6 +13,7 @@
 import type { Context as CordisContext } from '@deepseek-ai/cordis';
 import type { SkillRegistration } from '@deepseek-ai/dsh-skill';
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
+import type { HostConnectionHandle } from '@deepseek-ai/dsh-client-connection';
 /** The upgrade socket face (structural subset: the destroy the fence uses). */
 export interface UpgradeSocket {
     destroy(): void;
@@ -38,10 +39,8 @@ export interface Sessions {
         header?: SessionHeader;
     } | undefined;
 }
-/** The web runtime face this plugin uses (trusted hosts for the fence). */
-export interface WebRuntime {
-    trustedHosts: readonly string[];
-}
+/** Admission and authentication are owned by the target Host Connection. */
+export type ControllerConnection = Pick<HostConnectionHandle, 'requestRejection'>;
 /** The tools service face (dsh-tools already augments Context; kept here for
  *  call sites that do not import the augmentation). */
 export interface Tools {
@@ -54,9 +53,10 @@ export interface Skills {
 }
 /** The Context this plugin's host half sees. */
 export interface ControllerContextShape {
+    sessionController?: import('./session-directory.ts').SessionDirectoryContext['sessionController'];
     webServer: WebServer;
     sessions: Sessions;
-    webRuntime: WebRuntime;
+    connection: ControllerConnection;
     tools: Tools;
     skills?: Skills;
 }

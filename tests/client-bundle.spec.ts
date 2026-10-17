@@ -174,7 +174,7 @@ describe('built desktop client', () => {
     const p = probe(); const updates: any[] = []; const render = p.descriptors[0]!.settings.render
     const props = { prefs: { agentOpenTools: false }, pluginSettings: {}, updatePluginSetting: (...args: any[]) => updates.push(args) }
     const off = JSON.stringify(render(props)); expect(off).not.toContain('"children":["列出隐藏项"]'); expect(off).toContain('查看 Agent 使用说明')
-    const on = JSON.stringify(render({ ...props, pluginSettings: { agentControlTools: true } })); expect(on).toContain('列出隐藏项'); expect(on).toContain('BRIDGE_TIMEOUT'); expect(on).toContain('完整操作流程示例'); p.teardown()
+    const on = JSON.stringify(render({ ...props, pluginSettings: { agentControlTools: true } })); expect(on).toContain('列出隐藏项'); expect(on).toContain('BRIDGE_TIMEOUT'); expect(on).toContain(JSON.stringify(readFileSync(new URL('../docs/usage.md', import.meta.url), 'utf8'))); p.teardown()
     const legacy = JSON.stringify(render({ ...props, pluginSettings: { agentControlTools: true, maxListedEntries: -2.5 } }))
     expect(legacy).toContain('"value":1'); expect(legacy).not.toContain('"value":-2.5')
   })

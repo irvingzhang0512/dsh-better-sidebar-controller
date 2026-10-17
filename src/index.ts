@@ -1,3 +1,4 @@
+import { sessionDirectory } from './session-directory.ts'
 /**
  * dsh-better-sidebar-controller — host half.
  *
@@ -43,7 +44,7 @@ export const name = 'dsh-better-sidebar-controller'
  *  session store (authoritative cwd), the web runtime's trusted hosts, the
  *  tool registry, and the skill registry (for self-registering the bundled
  *  SKILL.md so installing the plugin also installs its skill). */
-export const inject = ['tools', 'webServer', 'sessions', 'webRuntime', 'skills']
+export const inject = ['tools', 'webServer', 'sessions', 'connection', 'skills', 'sessionController']
 
 /** Bridge upgrade path (must match the client half). */
 export const BRIDGE_PATH = '/sidebar-controller/ws'
@@ -76,15 +77,12 @@ export function apply(ctx: Context): void {
     store,
     authorize,
     resolveWorkspaceRoot: async (sessionId) => {
-      const session = ctx.sessions.get(sessionId)
-      const cwd = session?.header?.cwd
-      if (typeof cwd === 'string' && cwd !== '') return cwd
-      return process.cwd()
+      return sessionDirectory(ctx, sessionId)
     },
   })
 
   // Browser-trust fence identical to the /api gateway's.
-  const fence = (req: IncomingMessage): boolean => isTrustedApiRequest(req, ctx.webRuntime.trustedHosts)
+  const fence = (req: IncomingMessage): boolean => isTrustedApiRequest(req, ctx.connection)
 
   const wss = new WebSocketServer({ noServer: true })
   ctx.effect(() => ctx.webServer.registerUpgrade({
@@ -109,10 +107,7 @@ export function apply(ctx: Context): void {
 
   const deps = {
     getCwd: async (sessionId) => {
-      const session = ctx.sessions.get(sessionId)
-      const cwd = session?.header?.cwd
-      if (typeof cwd === 'string' && cwd !== '') return cwd
-      return process.cwd()
+      return sessionDirectory(ctx, sessionId)
     },
     store,
     bridge,
