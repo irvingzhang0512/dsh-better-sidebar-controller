@@ -82,3 +82,7 @@
 - desktop WebSocket 使用公开 __DSH_TRANSPORT__.streamBaseUrl，HTTP 继续使用 hostRouteUrl；官方 dsh-app://app 来源只在 loopback Host 且非 cross-site 标记下接受。
 - 同会话多视图只投递到首个有效连接，发送失败才尝试后续连接，避免在多个视图重复打开网页；所有界面仍按会话同步状态。
 - 运行与文档验证见 [交付记录](VERIFICATION-0.3.0.md)。
+
+## 2026-10-18 统一展示与套件交付契约
+
+依据用户已确认的 office-suite-implementation-20261018-v1。Irving · 侧边栏控制工具／Irving · Sidebar Control Tools，包 dsh-better-sidebar-controller 统一 0.2.1-rc.2+rev.1。展示资源通过 locale 导出提供；原条目 id、服务／工具／客户端身份、配置及存储保持。组合分组为 dsh-office-bundle-members；保留本成员原始 patch 行，用户覆盖继续按原 id 命中；子开关不因总开关恢复而重置。版本按完整字符串与固定散列核对；本节不授权原先待确认的业务扩展。

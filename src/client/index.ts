@@ -204,7 +204,7 @@ export function apply(ctx: Context): void {
       }
       capturing = false
     }
-    const disposeAnchor = service.registerTab({ id: ANCHOR_ID, hidden: true, single: true, title: 'Sidebar Controller 增强控制', settings: { render: ControllerSettings }, component: (props: TabComponentProps) => {
+    const disposeAnchor = service.registerTab({ id: ANCHOR_ID, hidden: true, single: true, title: 'Irving · 侧边栏控制工具', settings: { render: ControllerSettings }, component: (props: TabComponentProps) => {
       store = props.store
       queueMicrotask(() => { if (!closed) cleanupAnchor() })
       return null

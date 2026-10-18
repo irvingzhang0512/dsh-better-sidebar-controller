@@ -1,4 +1,4 @@
-# dsh-better-sidebar-controller
+# Irving · Sidebar Control Tools
 
 **用自然语言让 Agent 打开文件、切换标签、整理文件树，操作你正在使用的侧边栏。**
 
@@ -13,7 +13,7 @@
 
 ## 安装
 
-当前本地版本 **0.3.1**，适配 **DSH Desktop 0.2.1-rc.2 + Better Sidebar 0.28.0**。先安装并启用 Better Sidebar，再安装本扩展。
+当前本地版本 **0.2.1-rc.2+rev.1**，适配 **DSH Desktop 0.2.1-rc.2 + Better Sidebar 0.28.0**。先安装并启用 Better Sidebar，再安装本扩展。
 
 截至 2026-10-18，[公开源码仓库](https://github.com/irvingzhang0512/dsh-better-sidebar-controller)默认分支包版本为 **0.1.0**，本页版本尚未公开推送或发布。先向维护者获取本版完整预构建安装包，目前没有本版公开下载链接。
 
@@ -105,3 +105,8 @@
 - [工具参考](docs/tools.md)：12 个工具的参数与返回值。
 - [当前规格](docs/SPEC.md)／[技术契约](docs/architecture.md)：开发与集成依据。
 - [捆绑技能](skills/sidebar-controller/SKILL.md)：Agent 的执行规则。
+
+
+## Office Suite
+
+This component is also included in **Irving · Office Suite** (`dsh-office-bundle`), version **0.2.1-rc.2+rev.1**. Use the suite for a combined installation, or this package for a standalone installation. Do not enable both composition entries. The suite switch stops all four components; turning it back on preserves each component’s own switch. Disabling or uninstalling retains documents and settings. When migrating an existing installation, use the maintainer’s fixed-package migration rather than adding another copy.

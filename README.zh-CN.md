@@ -1,4 +1,4 @@
-# dsh-better-sidebar-controller
+# Irving · 侧边栏控制工具
 
 **用自然语言让 Agent 打开文件、切换标签、整理文件树，操作你正在使用的侧边栏。**
 
@@ -13,7 +13,7 @@
 
 ## 安装
 
-当前本地版本 **0.3.1**，适配 **DSH Desktop 0.2.1-rc.2 + Better Sidebar 0.28.0**。先安装并启用 Better Sidebar，再安装本扩展。
+当前本地版本 **0.2.1-rc.2+rev.1**，适配 **DSH Desktop 0.2.1-rc.2 + Better Sidebar 0.28.0**。先安装并启用 Better Sidebar，再安装本扩展。
 
 截至 2026-10-18，[公开源码仓库](https://github.com/irvingzhang0512/dsh-better-sidebar-controller)默认分支包版本为 **0.1.0**，本页版本尚未公开推送或发布。先向维护者获取本版完整预构建安装包，目前没有本版公开下载链接。
 
@@ -105,3 +105,8 @@
 - [工具参考](docs/tools.md)：12 个工具的参数与返回值。
 - [当前规格](docs/SPEC.md)／[技术契约](docs/architecture.md)：开发与集成依据。
 - [捆绑技能](skills/sidebar-controller/SKILL.md)：Agent 的执行规则。
+
+
+## 办公套件
+
+本组件也包含在 **Irving · 办公套件**（`dsh-office-bundle`）中，版本 **0.2.1-rc.2+rev.1**。组合使用时安装套件；单独使用时安装本包，避免同时启用两种组合入口。套件总开关停用四个组件，重新开启保留各自子开关；停用或卸载不删除文档和设置。已有安装通过维护者的固定包接管流程切换。
