@@ -19,7 +19,7 @@
 
 1. 打开「插件 → 添加插件 → 安装第三方插件」，填写维护者提供的 .tgz 安装包的本机绝对路径。
 2. 核对包名和版本，启用后按提示重启 DSH。
-3. 在 Better Sidebar 的「设置 → 侧边卡片」确认出现「Sidebar Controller 增强控制」，再开启下节所需能力。
+3. 在 Better Sidebar 的「设置 → 侧边卡片」确认出现「Irving · 侧边栏控制工具」，再开启下节所需能力。
 
 本版构建、测试与隔离 Desktop／原生联调范围见 [兼容记录](docs/DSH-UPGRADE-20261017.md)。真实模型自然语言链路与公开来源安装仍需分别验收。
 
@@ -30,7 +30,7 @@
 | 位置 | 开关 | 用途 |
 |---|---|---|
 | 常规 | 为模型注入侧边栏打开工具 | 让 Agent 打开文件、文件夹和网页 |
-| Sidebar Controller 增强控制 → 功能设置 | 允许模型管理侧边栏 | 让 Agent 查询、切换和关闭文件，操作文件树及右侧栏显示 |
+| Irving · 侧边栏控制工具 → 功能设置 | 允许模型管理侧边栏 | 让 Agent 查询、切换和关闭文件，操作文件树及右侧栏显示 |
 
 两个开关未设置时均关闭，已有的打开开关值保留；**回到上一文件需要两个开关同时开启**。增强卡片会显示打开能力的关联状态，打开开关只需在「常规」设置一次。
 
@@ -96,7 +96,7 @@
 
 确认超时表示结果未知，操作可能已经发生。先查看界面或让 Agent 查询当前与已打开文件，再决定是否重试。
 
-三场景协作的扩展设计仍待确认／待实现，见 [当前规格](docs/SPEC.md)；不改变本版权限与设置规则，也不代表办公套件已经交付。
+三场景协作的扩展设计仍待确认／待实现，见 [当前规格](docs/SPEC.md)；不改变本版权限与设置规则，不属于办公套件本次交付的业务扩展。
 
 ## 更多文档
 
@@ -107,6 +107,8 @@
 - [捆绑技能](skills/sidebar-controller/SKILL.md)：Agent 的执行规则。
 
 
-## Office Suite
+## 办公套件
 
-This component is also included in **Irving · Office Suite** (`dsh-office-bundle`), version **0.2.1-rc.2+rev.1**. Use the suite for a combined installation, or this package for a standalone installation. Do not enable both composition entries. The suite switch stops all four components; turning it back on preserves each component’s own switch. Disabling or uninstalling retains documents and settings. When migrating an existing installation, use the maintainer’s fixed-package migration rather than adding another copy.
+本组件也包含在 **Irving · 办公套件**（`dsh-office-bundle`）中，版本 **0.2.1-rc.2+rev.1**。组合使用时安装套件；单独使用时安装本包，避免同时启用两种组合入口。套件总开关停用四个组件，重新开启保留各自子开关；停用或卸载不删除文档和设置。已有安装通过维护者的固定包接管流程切换。
+
+本次统一名称、版本与办公套件的实测范围见 [2026-10-18 验证记录](docs/VERIFICATION-OFFICE-20261018.md)。
