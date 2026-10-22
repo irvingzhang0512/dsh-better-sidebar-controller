@@ -1,0 +1,36 @@
+schema: spec-driven
+
+context: |
+  Language: zh-CN
+  All artifacts must be written in zh-CN.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+  本库需求唯一入口为 openspec/MIGRATION.md；现行行为在 specs，待定增量在 changes。
+  旧 docs/SPEC.md、原始需求和历史证据全文保留并冻结，不再双写活动规格。
+  技术契约和使用说明保留原职责；本轮迁移不改，后续已确认实现仍须同步。
+  新功能先完成 proposal、specs、design、tasks 和 review 的具体版确认记录，用户明确确认后才实施；同版确认不重复。
+  artifacts ready、格式校验和任务勾选不等于批准、已实现或产品验证；实现状态和验证证据分别记录。
+  预期不变的 Bug 可直接修复，不强制提案，不修改预期掩盖错误。
+  个人项目、会议、周报、计划和业务资料不得因软件需求整理移动、重写或复制到公共规格。
+  纯文档不改源码、测试实现、配置、运行 Skill、包版本或安装状态，不执行产品构建／安装，不自动提交推送。
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

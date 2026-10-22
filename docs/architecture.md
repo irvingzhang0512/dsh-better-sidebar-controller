@@ -1,5 +1,9 @@
 # 架构说明（Architecture）
 
+## Desktop 三场景联调契约（待确认）
+
+SPEC F014 及 [discussion-desktop-workflows-20261014-v1](DESKTOP-WORKFLOWS-20261014.md)规定与完成新契约的工作台／文档／视图联调。现有 F010–F013／0.3.0 的服务、权限、原生浏览镜像和配置所有者保持；浏览镜像不拥有文档 lease。本次只新增待验契约，不重复实现既有增强层。
+
 ## 增强控制层目标契约
 
 文档版：`sidebar-enhancement-20261011-v1`；对应 [SPEC F010–F013](SPEC.md#本次增强文档版与适用范围)。用户已确认，源码已实现（验证见 [交付记录](VERIFICATION-0.3.0.md)）；目标 DSH `0.2.0-rc.2`、better-sidebar `0.25.0`。本节维护当前实现契约；旧组合的历史验证不作为新版兼容证据。
@@ -82,6 +86,7 @@
 - desktop WebSocket 使用公开 __DSH_TRANSPORT__.streamBaseUrl，HTTP 继续使用 hostRouteUrl；官方 dsh-app://app 来源只在 loopback Host 且非 cross-site 标记下接受。
 - 同会话多视图只投递到首个有效连接，发送失败才尝试后续连接，避免在多个视图重复打开网页；所有界面仍按会话同步状态。
 - 运行与文档验证见 [交付记录](VERIFICATION-0.3.0.md)。
+
 
 ## 2026-10-18 统一展示与套件交付契约
 

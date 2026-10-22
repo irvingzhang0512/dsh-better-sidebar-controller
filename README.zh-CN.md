@@ -96,14 +96,14 @@
 
 确认超时表示结果未知，操作可能已经发生。先查看界面或让 Agent 查询当前与已打开文件，再决定是否重试。
 
-三场景协作的扩展设计仍待确认／待实现，见 [当前规格](docs/SPEC.md)；不改变本版权限与设置规则，不属于办公套件本次交付的业务扩展。
+三场景协作的扩展设计仍待确认／待实现，见 [Desktop 工作台协作提案](openspec/changes/desktop-workbench-integration/proposal.md)；不改变本版权限与设置规则，不属于办公套件本次交付的业务扩展。
 
 ## 更多文档
 
 - [使用指南](docs/usage.md)：完整操作流程、配置组合与排错。
 - [更新记录](CHANGELOG.md)：版本变化。
 - [工具参考](docs/tools.md)：12 个工具的参数与返回值。
-- [当前规格](docs/SPEC.md)／[技术契约](docs/architecture.md)：开发与集成依据。
+- [OpenSpec 现行规格与迁移索引](openspec/MIGRATION.md)／[技术契约](docs/architecture.md)：开发与集成依据。旧 docs/SPEC.md 和原始需求全文保留并冻结，不再双写；待定增量保持在 changes。
 - [捆绑技能](skills/sidebar-controller/SKILL.md)：Agent 的执行规则。
 
 
