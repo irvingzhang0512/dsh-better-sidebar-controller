@@ -29,7 +29,7 @@ async function mount(open = true, control = true) {
   const tools: ToolDef[] = []
   const prefs = { agentOpenTools: open, pluginSettings: { 'dsh-better-sidebar-controller:anchor': { agentControlTools: control } } }
   app.provide('configEditor', { entries: () => [{ options: { id: 'aggregate:sidebar', name: 'dsh-better-sidebar' }, fiber: { state: 2 }, parent: { tree: { ctx: { baseUrl: 'file:///profile/cordis.yml' } } } }] })
-  app.provide('pluginPackages', { packageOf: () => ({ version: '0.28.0' }) })
+  app.provide('pluginPackages', { packageOf: () => ({ version: '0.28.2' }) })
   app.provide('settings', { describe: () => [{ ns: 'aggregate:sidebar', value: prefs }] })
   const routes: UpgradeRoute[] = []
   const registeredSkills: SkillRegistration[] = []
