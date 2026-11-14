@@ -1,6 +1,6 @@
 {
   "name": "dsh-better-sidebar-controller",
-  "version": "0.2.2-rc.1+rev.1",
+  "version": "0.2.2-rc.3+rev.1",
   "description": "基于 DSH 官方侧边栏与 Better Sidebar，让 Agent 通过工具选择、打开、展示和切换文件。",
   "type": "module",
   "repository": {
@@ -38,7 +38,7 @@
   ],
   "engines": {
     "node": ">=20",
-    "dsh": "0.2.2-rc.1"
+    "dsh": "0.2.2-rc.3"
   },
   "dsh": {
     "bundle": {
@@ -72,10 +72,10 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-skill": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
-    "dsh-better-sidebar": "0.28.2",
-    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1"
+    "@deepseek-ai/dsh-skill": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
+    "dsh-better-sidebar": "0.32.1",
+    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.3"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-skill": {
@@ -87,19 +87,19 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.1.0",
-    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-scope": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-skill": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-scope": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-skill": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
     "@types/node": "24.19.2",
     "@types/react": "18.3.31",
     "@types/ws": "8.18.2",
-    "dsh-better-sidebar": "0.28.2",
+    "dsh-better-sidebar": "0.32.1",
     "tsdown": "0.23.5",
     "typescript": "5.9.3",
     "vitest": "4.1.12",
-    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.2-rc.3",
     "react": "18.3.1",
-    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1"
+    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.3"
   }
 }
